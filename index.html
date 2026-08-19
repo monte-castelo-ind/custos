@@ -416,8 +416,16 @@ window.nav=function(p){
 /* ============ PREÇO DE MP ============ */
 function precoBaseMP(codigo){
   var k=String(codigo);
+  // 1) preço manual gravado aqui no Custos (what-if permanente) tem prioridade
   var ov=cfgMP[k];
   if(ov && num(ov.precoKg)>0) return { preco:num(ov.precoKg), origem:'manual', fornecedor:(ov.obs||'') };
+  // 2) preço da planilha, cadastrado no Produlog em materiasPrimas.precoKg
+  var mp=mps.find(function(x){ return String(x.codigo)===k; });
+  if(mp && num(mp.precoKg)>0){
+    var q=mp.precoAtualizadoEm?('planilha · '+String(mp.precoAtualizadoEm).slice(0,10).split('-').reverse().join('/')):'planilha';
+    return { preco:num(mp.precoKg), origem:'planilha', fornecedor:q };
+  }
+  // 3) fallback: preço de compra por fornecedor (comprasMP)
   var lista=comprasMP.filter(function(c){ return String(c.codigo)===k && num(c.precoKg)>0 && c.ativo!==false; });
   if(!lista.length) return { preco:0, origem:'sem', fornecedor:'' };
   var escolhido=lista[0];
@@ -750,7 +758,7 @@ function renderMP(){
   var semPreco=0;
   Object.keys(usadas).forEach(function(k){ if(precoBaseMP(k).preco<=0) semPreco++; });
   document.getElementById('mp-alerta').innerHTML = semPreco>0
-    ? '<div class="alert a-warn">⚠ '+semPreco+' matéria(s)-prima usada(s) em receitas sem preço. Cadastre o preço de compra no Produlog (tela Compras) ou informe um preço manual aqui.</div>' : '';
+    ? '<div class="alert a-warn">⚠ '+semPreco+' matéria(s)-prima usada(s) em receitas sem preço. Cadastre o valor no Produlog em <strong>Cadastros › Cadastro de Matéria Prima</strong> (ou importe a planilha lá). O preço manual aqui serve para what-if pontual.</div>' : '';
 
   var lista=mps.map(function(m){
     var pb=precoBaseMP(m.codigo);
@@ -767,7 +775,7 @@ function renderMP(){
   var html='<thead><tr><th>Matéria-prima</th><th>Código</th><th class="r">Preço/kg</th><th>Origem</th><th class="r">Usada em</th><th></th></tr></thead><tbody>';
   if(!lista.length) html+='<tr><td colspan="6" class="empty">Nenhuma matéria-prima encontrada.</td></tr>';
   lista.forEach(function(x){
-    var pill=x.origem==='manual'?'<span class="pill p-warn">manual</span>':(x.origem==='compras'?'<span class="pill p-ok">compras</span>':'<span class="pill p-bad">sem preço</span>');
+    var pill=x.origem==='manual'?'<span class="pill p-warn">manual</span>':(x.origem==='planilha'?'<span class="pill p-ok">planilha</span>':(x.origem==='compras'?'<span class="pill p-mut">compras</span>':'<span class="pill p-bad">sem preço</span>'));
     html+='<tr>'+
       '<td><div class="nm">'+esc(x.m.nome||'—')+'</div>'+(x.forn?'<div style="font-size:10.5px;color:var(--muted)">'+esc(x.forn)+'</div>':'')+'</td>'+
       '<td class="mono" style="font-size:11.5px">'+esc(x.m.codigo)+'</td>'+
