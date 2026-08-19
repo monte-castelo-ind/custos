@@ -1183,6 +1183,13 @@ function liberar(d){
     cfgProduto={}; s.docs.forEach(function(x){ cfgProduto[x.id]=x.data(); }); render();
   }, function(e){ console.warn('custosProduto:',e.code||e.message); });
 
+  // PRODULOG: as regras do projeto montecastelo-a0764 hoje permitem leitura
+  // sem autenticação (o Produlog não usa Firebase Auth). Por isso ligamos os
+  // listeners aqui direto, sem depender do onAuthStateChanged(authProd).
+  // Se um dia o Produlog ganhar Auth, o callback abaixo cobre o caso e a
+  // função é idempotente (guardada por if(subs.mps) return).
+  ligarProdulog();
+
   if(!subs.cen) subs.cen=onSnapshot(collection(dbC,'custosCenarios'), function(s){
     cenarios=s.docs.map(function(x){ return Object.assign({ id:x.id }, x.data()); })
       .sort(function(a,b){ return String(b.atualizadoEm||'').localeCompare(String(a.atualizadoEm||'')); });
