@@ -114,6 +114,23 @@ th.ord-on{color:var(--primary)}
 .bar{height:6px;background:var(--track);border-radius:4px;overflow:hidden;margin-top:5px}
 .bar i{display:block;height:100%;border-radius:4px}
 .alert{border-radius:10px;padding:10px 13px;font-size:12.5px;display:flex;gap:9px;align-items:flex-start;margin-bottom:12px}
+
+/* indicador de avisos */
+.warnwrap{position:relative;display:none}
+.warnwrap.has{display:block}
+.warnbtn{position:relative;background:none;border:none;padding:3px 5px;line-height:1;font-size:17px;color:var(--amber);border-radius:8px;transition:background .12s}
+.warnbtn:hover{background:rgba(245,176,19,.12)}
+.warnbadge{position:absolute;top:-2px;right:-4px;background:var(--amber);color:#1a1400;font-size:9.5px;font-weight:700;min-width:14px;height:14px;line-height:14px;border-radius:8px;padding:0 3px;text-align:center;font-family:'JetBrains Mono',monospace}
+.warnpop{display:none;position:absolute;top:calc(100% + 8px);right:0;width:330px;max-width:78vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);z-index:90;overflow:hidden;text-align:left;cursor:default}
+.warnwrap:hover .warnpop,.warnwrap.open .warnpop{display:block}
+.warnpop-h{padding:9px 13px;border-bottom:1px solid var(--border);font-size:10.5px;font-weight:700;letter-spacing:.6px;color:var(--muted);text-transform:uppercase}
+.warnitem{display:flex;gap:9px;padding:10px 13px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.warnitem:last-child{border-bottom:none}
+.warnitem:hover{background:var(--card-2)}
+.warndot{width:6px;height:6px;border-radius:50%;flex:0 0 6px;margin-top:6px}
+.warntit{font-size:12.5px;font-weight:600;line-height:1.35}
+.warnsub{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+.warngo{font-size:11px;color:var(--primary);margin-top:3px;font-weight:600}
 .a-warn{background:rgba(245,176,19,.09);border:1px solid rgba(245,176,19,.3);color:var(--amber)}
 .a-info{background:rgba(75,123,236,.09);border:1px solid rgba(75,123,236,.3);color:var(--blue)}
 .fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:13px}
@@ -205,12 +222,17 @@ th.ord-on{color:var(--primary)}
   <main>
     <div class="topbar">
       <div><h1 id="ptitle">Painel</h1><div class="h1sub" id="psub">—</div></div>
-      <div id="freshness" style="font-size:11px;color:var(--muted)"></div>
+      <div style="display:flex;align-items:center;gap:13px">
+        <div class="warnwrap" id="warnWrap">
+          <button class="warnbtn" id="warnBtn" onclick="toggleAvisos(event)" title="Pendências">&#9888;<span class="warnbadge" id="warnBadge">0</span></button>
+          <div class="warnpop" id="warnPop"></div>
+        </div>
+        <div id="freshness" style="font-size:11px;color:var(--muted)"></div>
+      </div>
     </div>
 
     <!-- PAINEL -->
     <div class="page on" id="page-painel">
-      <div id="painel-alertas"></div>
       <div class="grid kpis" id="painel-kpis"></div>
       <div class="sect">Margem por produto</div>
       <div class="tools">
@@ -252,7 +274,6 @@ th.ord-on{color:var(--primary)}
 
     <!-- MP -->
     <div class="page" id="page-mp">
-      <div id="mp-alerta"></div>
       <div class="tools">
         <input type="text" id="mp-busca" placeholder="Buscar matéria-prima..." oninput="render()" />
         <select id="mp-filtro" onchange="render()">
@@ -615,9 +636,108 @@ function todosCustos(sim){
 }
 
 /* ============ RENDER ============ */
+/* ===== diagnosticos: tudo que precisa de atencao, num lugar so ===== */
+function diagnosticos(){
+  var out=[];
+  if(!produtos.length && !mps.length) return out;   // ainda carregando
+
+  if(!num(cfg.producaoKgMes)) out.push({
+    sev:'warn', titulo:'Produção kg/mês não configurada',
+    sub:'Mão de obra e custos fixos ficam fora do cálculo — o custo sai menor que o real.',
+    acao:'Ir para Configurações', pagina:'config'
+  });
+  if(!num(cfg.moMes) && !num(cfg.fixoMes) && num(cfg.producaoKgMes)) out.push({
+    sev:'warn', titulo:'Custos de conversão zerados',
+    sub:'Mão de obra e custos fixos estão em R$ 0 — só a matéria-prima está no custo.',
+    acao:'Ir para Configurações', pagina:'config'
+  });
+
+  var usadas=mpsUsadas(), mpSem=0;
+  Object.keys(usadas).forEach(function(k){ if(precoBaseMP(k).preco<=0) mpSem++; });
+  if(mpSem>0) out.push({
+    sev:'warn', titulo:mpSem+' matéria'+(mpSem>1?'s':'')+'-prima sem preço',
+    sub:'Usadas em receitas. O custo dos produtos afetados está subestimado.',
+    acao:'Ver matérias-primas', pagina:'mp'
+  });
+
+  var todos=todosCustos(null);
+  var semPreco=0, incompletos=0, negativos=0, abaixo=0;
+  todos.forEach(function(c){
+    if(!c.temPreco) semPreco++;
+    if(c.fichaIncompleta) incompletos++;
+    if(c.temPreco && !c.fichaIncompleta && c.margemPct!=null){
+      if(c.margemPct<0) negativos++;
+      else if(c.margemPct<cfg.margemAlvoPct) abaixo++;
+    }
+  });
+  if(negativos>0) out.push({
+    sev:'warn', titulo:negativos+' produto'+(negativos>1?'s':'')+' com margem negativa',
+    sub:'O preço de venda não cobre o custo total.',
+    acao:'Ver no painel', pagina:'painel', filtro:'negativo'
+  });
+  if(abaixo>0) out.push({
+    sev:'info', titulo:abaixo+' produto'+(abaixo>1?'s':'')+' abaixo da meta',
+    sub:'Margem líquida menor que '+fmtPct(cfg.margemAlvoPct)+'.',
+    acao:'Ver no painel', pagina:'painel', filtro:'abaixo'
+  });
+  if(semPreco>0) out.push({
+    sev:'info', titulo:semPreco+' produto'+(semPreco>1?'s':'')+' sem preço de venda',
+    sub:'Sem preço não há margem. Cadastre em Produtos.',
+    acao:'Ver produtos', pagina:'produtos'
+  });
+  if(incompletos>0) out.push({
+    sev:'info', titulo:incompletos+' produto'+(incompletos>1?'s':'')+' com ficha incompleta',
+    sub:'Sem massa/recheio no Produlog, ou receita sem custo de matéria-prima.',
+    acao:'Ver produtos', pagina:'produtos'
+  });
+  return out;
+}
+function renderAvisos(){
+  var wrap=document.getElementById('warnWrap'); if(!wrap) return;
+  var lista=diagnosticos();
+  if(!lista.length){ wrap.classList.remove('has','open'); return; }
+  wrap.classList.add('has');
+  var graves=lista.filter(function(x){ return x.sev==='warn'; }).length;
+  var badge=document.getElementById('warnBadge');
+  badge.textContent=lista.length;
+  badge.style.background = graves ? 'var(--amber)' : 'var(--blue)';
+  badge.style.color = graves ? '#1a1400' : '#fff';
+  document.getElementById('warnBtn').style.color = graves ? 'var(--amber)' : 'var(--blue)';
+  document.getElementById('warnPop').innerHTML=
+    '<div class="warnpop-h">'+lista.length+' ponto'+(lista.length>1?'s':'')+' de atenção</div>'+
+    lista.map(function(x,i){
+      var cor=x.sev==='warn'?'var(--amber)':'var(--blue)';
+      return '<div class="warnitem" onclick="irAviso('+i+')">'+
+        '<div class="warndot" style="background:'+cor+'"></div>'+
+        '<div style="min-width:0"><div class="warntit">'+esc(x.titulo)+'</div>'+
+        '<div class="warnsub">'+esc(x.sub)+'</div>'+
+        '<div class="warngo">'+esc(x.acao)+' \u2192</div></div></div>';
+    }).join('');
+  _avisos=lista;
+}
+var _avisos=[];
+window.irAviso=function(i){
+  var a=_avisos[i]; if(!a) return;
+  document.getElementById('warnWrap').classList.remove('open');
+  if(a.filtro){
+    var f=document.getElementById('pn-filtro');
+    if(f) f.value=a.filtro;
+  }
+  nav(a.pagina);
+};
+window.toggleAvisos=function(e){
+  if(e) e.stopPropagation();
+  document.getElementById('warnWrap').classList.toggle('open');
+};
+document.addEventListener('click', function(e){
+  var w=document.getElementById('warnWrap');
+  if(w && !w.contains(e.target)) w.classList.remove('open');
+});
+
 function render(){
   if(!currentAtivo) return;
   indexarReceitas();
+  renderAvisos();
   if(ultimaCarga) document.getElementById('freshness').textContent='Dados de '+ultimaCarga;
   if(pagina==='painel') renderPainel();
   else if(pagina==='produtos') renderProdutos();
@@ -647,9 +767,6 @@ function renderPainel(){
   var comPreco=todos.filter(function(c){ return c.temPreco && !c.fichaIncompleta; });
   var semPreco=todos.filter(function(c){ return !c.temPreco; }).length;
   var incompletos=todos.filter(function(c){ return c.fichaIncompleta; }).length;
-  var mpSemPreco=0, mpUsadas=mpsUsadas();
-  Object.keys(mpUsadas).forEach(function(k){ if(precoBaseMP(k).preco<=0) mpSemPreco++; });
-
   var margemMedia=null, abaixo=0, negativos=0;
   if(comPreco.length){
     var somaMg=0;
@@ -657,11 +774,7 @@ function renderPainel(){
     margemMedia=somaMg/comPreco.length;
   }
 
-  var alertas='';
-  if(!num(cfg.producaoKgMes)) alertas+='<div class="alert a-warn">⚠ Produção kg/mês não configurada — mão de obra e custos fixos estão fora do cálculo. Ajuste em <strong>Configurações</strong>.</div>';
-  if(mpSemPreco>0) alertas+='<div class="alert a-warn">⚠ '+mpSemPreco+' matéria(s)-prima usada(s) em receitas está(ão) sem preço. O custo está subestimado. Ver <strong>Matérias-primas</strong>.</div>';
-  if(semPreco>0) alertas+='<div class="alert a-info">◇ '+semPreco+' produto(s) sem preço de venda cadastrado — margem não calculada.</div>';
-  document.getElementById('painel-alertas').innerHTML=alertas;
+  // (os avisos foram para o indicador ⚠ no topo — ver renderAvisos)
 
   var kpis=[
     { l:'Margem líquida média', v:margemMedia!=null?fmtPct(margemMedia):'—', h:comPreco.length+' produto(s) com cálculo completo', c:margemMedia!=null?(margemMedia<cfg.margemAlvoPct?'var(--amber)':'var(--green)'):'' },
@@ -858,11 +971,6 @@ function renderMP(){
   var usadas=mpsUsadas();
   var q=norm(document.getElementById('mp-busca').value);
   var f=document.getElementById('mp-filtro').value;
-  var semPreco=0;
-  Object.keys(usadas).forEach(function(k){ if(precoBaseMP(k).preco<=0) semPreco++; });
-  document.getElementById('mp-alerta').innerHTML = semPreco>0
-    ? '<div class="alert a-warn">⚠ '+semPreco+' matéria(s)-prima usada(s) em receitas sem preço. Cadastre o valor no Produlog em <strong>Cadastros › Cadastro de Matéria Prima</strong> (ou importe a planilha lá). O preço manual aqui serve para what-if pontual.</div>' : '';
-
   var lista=mps.map(function(m){
     var pb=precoBaseMP(m.codigo);
     return { m:m, preco:pb.preco, origem:pb.origem, forn:pb.fornecedor, uso:usadas[String(m.codigo)]||0 };
