@@ -45,8 +45,21 @@ a{color:var(--primary)}
 /* SHELL */
 #app{display:none;min-height:100vh}
 .shell{display:flex;min-height:100vh}
-.side{width:214px;flex:0 0 214px;background:var(--sidebar);border-right:1px solid var(--border);padding:18px 12px;display:flex;flex-direction:column;gap:3px;position:sticky;top:0;height:100vh;overflow-y:auto}
-.side-logo{font-size:16px;font-weight:700;padding:0 10px 16px;letter-spacing:-.3px}
+.side{width:56px;background:var(--sidebar);border-right:1px solid var(--border);padding:18px 8px;display:flex;flex-direction:column;gap:3px;position:fixed;left:0;top:0;height:100vh;overflow-x:hidden;overflow-y:auto;z-index:60;transition:width .16s ease, box-shadow .16s ease;white-space:nowrap}
+.side:hover,.side.pin{width:214px;padding:18px 12px;box-shadow:6px 0 24px rgba(0,0,0,.28)}
+html[data-theme="light"] .side:hover,html[data-theme="light"] .side.pin{box-shadow:6px 0 24px rgba(20,25,45,.10)}
+.side.pin{box-shadow:none;border-right:1px solid var(--border)}
+.side .lbl{opacity:0;transition:opacity .12s ease}
+.side:hover .lbl,.side.pin .lbl{opacity:1}
+.shell>main{margin-left:56px;transition:margin-left .16s ease}
+.side.pin ~ main{margin-left:214px}
+.side-ico{display:inline-block;width:22px;flex:0 0 22px;text-align:center;font-size:15px}
+.pinbtn{position:absolute;top:14px;right:9px;background:none;border:none;color:var(--muted);font-size:14px;padding:2px 5px;border-radius:6px;opacity:0;transition:opacity .12s}
+.side:hover .pinbtn,.side.pin .pinbtn{opacity:1}
+.pinbtn:hover{background:var(--card-2);color:var(--text)}
+.side.pin .pinbtn{color:var(--primary)}
+.edge{position:fixed;left:0;top:0;width:8px;height:100vh;z-index:59}
+.side-logo{font-size:16px;font-weight:700;padding:0 6px 16px;letter-spacing:-.3px;overflow:hidden}
 .side-logo span{color:var(--primary)}
 .navbtn{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;background:none;border:none;color:var(--muted);font-size:13.5px;font-weight:500;text-align:left;width:100%}
 .navbtn:hover{background:var(--card-2);color:var(--text)}
@@ -83,8 +96,9 @@ th.r,td.r{text-align:right}
 td{padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
 tr:last-child td{border-bottom:none}
 tbody tr:hover{background:var(--card-2)}
-th.sortable{cursor:pointer;user-select:none}
-th.sortable:hover{color:var(--text)}
+th.sortable{cursor:pointer;user-select:none;transition:color .1s}
+th.sortable:hover{color:var(--text);background:var(--card)}
+th.ord-on{color:var(--primary)}
 .nm{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clickrow{cursor:pointer}
 .empty{padding:34px 18px;text-align:center;color:var(--muted);font-size:13px}
@@ -127,7 +141,10 @@ th.sortable:hover{color:var(--text)}
 
 @media(max-width:900px){
   .shell{flex-direction:column}
-  .side{width:100%;flex:none;height:auto;position:static;flex-direction:row;overflow-x:auto;padding:10px;gap:6px;align-items:center}
+  .side,.side:hover,.side.pin{width:100%;flex:none;height:auto;position:static;flex-direction:row;overflow-x:auto;overflow-y:hidden;padding:10px;gap:6px;align-items:center;box-shadow:none;transition:none}
+  .side .lbl{opacity:1}
+  .pinbtn,.edge{display:none}
+  .shell>main,.side.pin ~ main{margin-left:0}
   .side-logo{display:none}
   .side-foot{margin:0;padding:0;border:none;border-left:1px solid var(--border);padding-left:8px}
   .uinfo{display:none}
@@ -163,22 +180,24 @@ th.sortable:hover{color:var(--text)}
 
 <div id="app">
 <div class="shell">
-  <nav class="side">
-    <div class="side-logo">Custos<span>.</span></div>
-    <button class="navbtn on" data-p="painel" onclick="nav('painel')">◧ Painel</button>
-    <button class="navbtn" data-p="produtos" onclick="nav('produtos')">▤ Produtos</button>
-    <button class="navbtn" data-p="receitas" onclick="nav('receitas')">◈ Receitas</button>
-    <button class="navbtn" data-p="mp" onclick="nav('mp')">◇ Matérias-primas</button>
-    <button class="navbtn" data-p="sim" onclick="nav('sim')">⇄ Simulação</button>
-    <button class="navbtn" data-p="config" onclick="nav('config')">⚙ Configurações</button>
+  <div class="edge" id="sideEdge"></div>
+  <nav class="side" id="sidebar">
+    <button class="pinbtn" id="pinBtn" onclick="togglePin(event)" title="Fixar menu aberto">◨</button>
+    <div class="side-logo"><span class="side-ico">◰</span><span class="lbl">Custos.</span></div>
+    <button class="navbtn on" data-p="painel" onclick="nav('painel')"><span class="side-ico">◧</span><span class="lbl">Painel</span></button>
+    <button class="navbtn" data-p="produtos" onclick="nav('produtos')"><span class="side-ico">≣</span><span class="lbl">Produtos</span></button>
+    <button class="navbtn" data-p="receitas" onclick="nav('receitas')"><span class="side-ico">◈</span><span class="lbl">Receitas</span></button>
+    <button class="navbtn" data-p="mp" onclick="nav('mp')"><span class="side-ico">◇</span><span class="lbl">Matérias-primas</span></button>
+    <button class="navbtn" data-p="sim" onclick="nav('sim')"><span class="side-ico">⇄</span><span class="lbl">Simulação</span></button>
+    <button class="navbtn" data-p="config" onclick="nav('config')"><span class="side-ico">⚙</span><span class="lbl">Configurações</span></button>
     <div class="side-foot">
       <div class="uline">
         <div class="uav" id="uavatar">?</div>
-        <div class="uinfo"><div class="uname" id="uname">—</div><div class="urole" id="urole">—</div></div>
+        <div class="uinfo lbl"><div class="uname" id="uname">—</div><div class="urole" id="urole">—</div></div>
       </div>
-      <div style="display:flex;gap:6px;padding:0 6px">
-        <button class="btn btn-sm btn-ghost" onclick="toggleTema()" style="flex:1">◐</button>
-        <button class="btn btn-sm btn-ghost" onclick="sair()" style="flex:2">Sair</button>
+      <div style="display:flex;gap:6px;padding:0 2px">
+        <button class="btn btn-sm btn-ghost" onclick="toggleTema()" style="flex:1;padding:7px 0" title="Tema claro/escuro">◐</button>
+        <button class="btn btn-sm btn-ghost lbl" onclick="sair()" style="flex:2">Sair</button>
       </div>
     </div>
   </nav>
@@ -377,7 +396,12 @@ var cfgMP={}, cfgProduto={}, cenarios=[];
 var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20 };
 var simAtual={ id:null, nome:'Cenário sem título', ajustes:{}, globalPct:0, vendaPct:0 };
 var subs={};
-var ordProd={ col:'margemPct', dir:1 };
+var ord={
+  painel:   { col:'margemPct', dir:1  },
+  produtos: { col:'nome',      dir:1  },
+  receitas: { col:'custoKg',   dir:-1 },
+  mp:       { col:'uso',       dir:-1 }
+};
 var ultimaCarga=null;
 
 const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
@@ -398,6 +422,38 @@ function corMargem(pct){ if(pct==null||!isFinite(pct)) return 'p-mut'; if(pct<0)
 function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); try{ localStorage.setItem('mc_custos_theme',t); }catch(e){} }
 window.toggleTema=function(){ var cur=document.documentElement.getAttribute('data-theme')||'dark'; applyTheme(cur==='dark'?'light':'dark'); };
 (function(){ try{ var t=localStorage.getItem('mc_custos_theme'); applyTheme(t==='light'?'light':'dark'); }catch(e){ applyTheme('dark'); } })();
+
+/* ============ SIDEBAR RETRATIL ============ */
+window.togglePin=function(e){
+  if(e) e.stopPropagation();
+  var s=document.getElementById('sidebar');
+  var on=s.classList.toggle('pin');
+  try{ localStorage.setItem('mc_custos_pin', on?'1':'0'); }catch(err){}
+  var b=document.getElementById('pinBtn');
+  if(b) b.title = on ? 'Soltar menu' : 'Fixar menu aberto';
+};
+(function(){
+  try{
+    if(localStorage.getItem('mc_custos_pin')==='1'){
+      var s=document.getElementById('sidebar'); if(s) s.classList.add('pin');
+    }
+  }catch(e){}
+  // abrir ao encostar na borda esquerda (util em telas grandes)
+  var edge=document.getElementById('sideEdge'), side=document.getElementById('sidebar');
+  if(edge&&side){
+    edge.addEventListener('mouseenter', function(){
+      side.style.width='214px'; side.style.padding='18px 12px';
+      side.querySelectorAll('.lbl').forEach(function(x){ x.style.opacity='1'; });
+      var sair=function(){
+        if(side.classList.contains('pin')) return;
+        side.style.width=''; side.style.padding='';
+        side.querySelectorAll('.lbl').forEach(function(x){ x.style.opacity=''; });
+        side.removeEventListener('mouseleave', sair);
+      };
+      side.addEventListener('mouseleave', sair);
+    });
+  }
+})();
 
 /* ============ NAV ============ */
 window.nav=function(p){
@@ -632,31 +688,32 @@ function renderPainel(){
     if(f==='incompleto') return c.fichaIncompleta;
     return true;
   });
-  ordenar(lista, ordProd);
-
   var cols=[
-    { k:'nome', l:'Produto', s:true },
-    { k:'custoUn', l:'Custo/un', s:true, r:true },
-    { k:'custoKg', l:'Custo/kg', s:true, r:true },
-    { k:'precoVendaUn', l:'Venda/un', s:true, r:true },
-    { k:'mcPct', l:'Margem contrib.', s:true, r:true },
-    { k:'margemPct', l:'Margem líq.', s:true, r:true },
-    { k:'markup', l:'Markup', s:true, r:true }
+    { k:'cod',        l:'Cód',            v:function(c){ return String(c.p.cod||''); } },
+    { k:'nome',       l:'Produto',        v:function(c){ return norm(c.p.nome); } },
+    { k:'classe',     l:'Classe',         v:function(c){ return norm(c.p.classe); } },
+    { k:'custoUn',    l:'Custo/un',  r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
+    { k:'custoKg',    l:'Custo/kg',  r:1, v:function(c){ return c.custoKg; } },
+    { k:'precoVendaUn',l:'Venda/un', r:1, v:function(c){ return c.precoVendaUn; } },
+    { k:'mcPct',      l:'Mg contrib.',r:1,v:function(c){ return c.mcPct; } },
+    { k:'margemPct',  l:'Mg líq.',   r:1, v:function(c){ return c.margemPct; } },
+    { k:'markup',     l:'Markup',    r:1, v:function(c){ return c.markup; } }
   ];
-  var html='<thead><tr>'+cols.map(function(c){
-    var ar=(ordProd.col===c.k)?(ordProd.dir>0?' ▲':' ▼'):'';
-    return '<th class="'+(c.r?'r ':'')+(c.s?'sortable':'')+'"'+(c.s?' onclick="ordCol(\''+c.k+'\')"':'')+'>'+esc(c.l)+ar+'</th>';
-  }).join('')+'</tr></thead><tbody>';
-  if(!lista.length) html+='<tr><td colspan="7" class="empty">Nenhum produto encontrado.</td></tr>';
+  ordenarPor(lista, 'painel', cols);
+
+  var html=thead('painel', cols)+'<tbody>';
+  if(!lista.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhum produto encontrado.</td></tr>';
   lista.forEach(function(c){
     html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
-      '<td><div class="nm">'+esc(c.p.nome||'—')+'</div><div style="font-size:10.5px;color:var(--muted)" class="mono">'+esc(c.p.cod||'')+(c.p.classe?' · '+esc(c.p.classe):'')+'</div></td>'+
+      '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
+      '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
+      '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
       '<td class="r num">'+(c.custoUn>0?fmtR$(c.custoUn,3):'—')+(c.fichaIncompleta?' <span class="pill p-warn">?</span>':'')+'</td>'+
       '<td class="r num">'+(c.custoKg?fmtR$(c.custoKg):'—')+'</td>'+
       '<td class="r num">'+(c.temPreco?fmtR$(c.precoVendaUn,3):'<span class="pill p-mut">definir</span>')+'</td>'+
       '<td class="r num">'+(c.mcPct!=null?fmtPct(c.mcPct):'—')+'</td>'+
       '<td class="r"><span class="pill '+corMargem(c.margemPct)+'">'+(c.margemPct!=null?fmtPct(c.margemPct):'—')+'</span></td>'+
-      '<td class="r num">'+(c.markup?fmtN(c.markup,2)+'×':'—')+'</td></tr>';
+      '<td class="r num">'+(c.markup?fmtN(c.markup,2)+'\u00d7':'—')+'</td></tr>';
   });
   document.getElementById('tbl-prod').innerHTML=html+'</tbody>';
 }
@@ -666,18 +723,40 @@ function mediaCustoKg(lista){
   var s=0; v.forEach(function(c){ s+=c.custoKg; });
   return fmtR$(s/v.length);
 }
-function ordenar(lista, o){
+/* ===== ordenacao generica de tabelas =====
+   Cada tabela declara suas colunas: { k, l, r, v }
+   k = chave, l = rotulo, r = alinhar a direita, v = funcao que extrai o valor  */
+function thead(tabela, cols){
+  var o=ord[tabela];
+  return '<thead><tr>'+cols.map(function(c){
+    var ativa=(o.col===c.k);
+    var seta=ativa?(o.dir>0?' \u25b2':' \u25bc'):'<span style="opacity:.25"> \u25b4\u25be</span>';
+    return '<th class="'+(c.r?'r ':'')+'sortable'+(ativa?' ord-on':'')+'" onclick="ordCol(\''+tabela+'\',\''+c.k+'\')" title="Ordenar por '+esc(c.l)+'">'+esc(c.l)+seta+'</th>';
+  }).join('')+'</tr></thead>';
+}
+function ordenarPor(lista, tabela, cols){
+  var o=ord[tabela];
+  var col=null;
+  for(var i=0;i<cols.length;i++){ if(cols[i].k===o.col){ col=cols[i]; break; } }
+  if(!col) return;
   lista.sort(function(a,b){
-    var va,vb;
-    if(o.col==='nome'){ va=norm(a.p.nome); vb=norm(b.p.nome); return va<vb?-o.dir:(va>vb?o.dir:0); }
-    va=a[o.col]; vb=b[o.col];
-    if(va==null&&vb==null) return 0;
-    if(va==null) return 1; if(vb==null) return -1;
+    var va=col.v(a), vb=col.v(b);
+    var sa=(typeof va==='string'), sb=(typeof vb==='string');
+    if(sa||sb){
+      va=(va==null?'':String(va)); vb=(vb==null?'':String(vb));
+      return va.localeCompare(vb,'pt-BR',{numeric:true})*o.dir;
+    }
+    var na=(va==null||!isFinite(va)), nb=(vb==null||!isFinite(vb));
+    if(na&&nb) return 0;
+    if(na) return 1;          // vazios sempre no fim, independente da direcao
+    if(nb) return -1;
     return (va-vb)*o.dir;
   });
 }
-window.ordCol=function(k){
-  if(ordProd.col===k) ordProd.dir=-ordProd.dir; else { ordProd.col=k; ordProd.dir=(k==='nome'?1:1); }
+window.ordCol=function(tabela, k){
+  var o=ord[tabela];
+  if(o.col===k) o.dir=-o.dir;
+  else { o.col=k; o.dir=(k==='nome'||k==='cod'?1:-1); }
   render();
 };
 function mpsUsadas(){
@@ -698,20 +777,33 @@ function renderProdutos(){
     if(cl && c.p.classe!==cl) return false;
     return true;
   });
-  todos.sort(function(a,b){ return norm(a.p.nome)<norm(b.p.nome)?-1:1; });
-  var html='<thead><tr><th>Produto</th><th>Ficha (massa · recheios)</th><th class="r">Peso/un</th><th class="r">Un/pct</th><th class="r">Custo/un</th><th class="r">Venda</th><th class="r">Margem</th><th></th></tr></thead><tbody>';
-  if(!todos.length) html+='<tr><td colspan="8" class="empty">Nenhum produto. Confirme se o Produlog tem produtos cadastrados em <span class="mono">produtosConfeitaria</span>.</td></tr>';
+  var cols=[
+    { k:'cod',      l:'Cód',              v:function(c){ return String(c.p.cod||''); } },
+    { k:'nome',     l:'Produto',          v:function(c){ return norm(c.p.nome); } },
+    { k:'classe',   l:'Classe',           v:function(c){ return norm(c.p.classe); } },
+    { k:'ficha',    l:'Ficha (massa · recheios)', v:function(c){ return c.comps.length; } },
+    { k:'pesoUnG',  l:'Peso/un',     r:1, v:function(c){ return c.pesoUnG>0?c.pesoUnG:null; } },
+    { k:'qtdPct',   l:'Un/pct',      r:1, v:function(c){ return c.qtdPct>0?c.qtdPct:null; } },
+    { k:'custoUn',  l:'Custo/un',    r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
+    { k:'precoVendaBruto', l:'Venda', r:1, v:function(c){ return c.temPreco?c.precoVendaBruto:null; } },
+    { k:'margemPct',l:'Margem',      r:1, v:function(c){ return c.margemPct; } }
+  ];
+  ordenarPor(todos, 'produtos', cols);
+
+  var html=thead('produtos', cols)+'<tbody>';
+  if(!todos.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhum produto. Confirme se o Produlog tem produtos cadastrados em <span class="mono">produtosConfeitaria</span>.</td></tr>';
   todos.forEach(function(c){
     var ficha=c.comps.map(function(x){ return esc(x.nome)+' <span class="mono" style="color:var(--muted)">'+fmtN(x.gramas,1)+'g</span>'; }).join(' + ')||'<span class="pill p-warn">sem ficha</span>';
-    html+='<tr>'+
-      '<td><div class="nm">'+esc(c.p.nome||'—')+'</div><div style="font-size:10.5px;color:var(--muted)" class="mono">'+esc(c.p.cod||'')+'</div></td>'+
+    html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
+      '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
+      '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
+      '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
       '<td style="white-space:normal;max-width:330px;font-size:12px">'+ficha+'</td>'+
       '<td class="r num">'+(c.pesoUnG>0?fmtN(c.pesoUnG,1)+'g':'—')+'</td>'+
       '<td class="r num">'+(c.qtdPct>0?fmtN(c.qtdPct,0):'—')+'</td>'+
       '<td class="r num">'+(c.custoUn>0?fmtR$(c.custoUn,3):'—')+'</td>'+
       '<td class="r num">'+(c.temPreco?fmtR$(c.precoVendaBruto,2)+'<span style="font-size:10px;color:var(--muted)">/'+esc(c.baseVenda==='pct'?'pct':c.baseVenda)+'</span>':'—')+'</td>'+
-      '<td class="r"><span class="pill '+corMargem(c.margemPct)+'">'+(c.margemPct!=null?fmtPct(c.margemPct):'—')+'</span></td>'+
-      '<td class="r"><button class="btn btn-sm btn-ghost" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">Abrir</button></td></tr>';
+      '<td class="r"><span class="pill '+corMargem(c.margemPct)+'">'+(c.margemPct!=null?fmtPct(c.margemPct):'—')+'</span></td></tr>';
   });
   document.getElementById('tbl-produtos').innerHTML=html+'</tbody>';
 }
@@ -725,27 +817,38 @@ function renderReceitas(){
   if(t!=='massa') recheios.forEach(function(r){ lista.push({ r:r, tipo:'recheio' }); });
   lista=lista.filter(function(x){ return !q || norm(x.r.nome).indexOf(q)>=0 || String(x.r.codigo||'').indexOf(q)>=0; });
   lista.forEach(function(x){ x.c=custoReceita(x.r,null); });
-  lista.sort(function(a,b){ return (b.c?b.c.custoKg:0)-(a.c?a.c.custoKg:0); });
 
   var usoProd={};
   produtos.forEach(function(p){
     [p.tipoMassa,p.tipoRecheio,p.tipoRecheio2].forEach(function(n){ if(n) usoProd[norm(n)]=(usoProd[norm(n)]||0)+1; });
   });
+  lista.forEach(function(x){ x.nProd=usoProd[norm(x.r.nome)]||0; });
 
-  var html='<thead><tr><th>Receita</th><th>Tipo</th><th class="r">Ingred.</th><th class="r">Rendimento</th><th class="r">Custo/kg</th><th class="r">Produtos</th><th></th></tr></thead><tbody>';
-  if(!lista.length) html+='<tr><td colspan="7" class="empty">Nenhuma receita encontrada.</td></tr>';
+  var cols=[
+    { k:'codigo',  l:'Cód',              v:function(x){ return String(x.r.codigo||''); } },
+    { k:'nome',    l:'Receita',          v:function(x){ return norm(x.r.nome); } },
+    { k:'tipo',    l:'Tipo',             v:function(x){ return x.tipo; } },
+    { k:'nIng',    l:'Ingred.',     r:1, v:function(x){ return (x.c&&x.c.detalhe)?x.c.detalhe.length:0; } },
+    { k:'rend',    l:'Rendimento',  r:1, v:function(x){ return (x.c&&x.c.rend>0)?x.c.rend:null; } },
+    { k:'custoKg', l:'Custo/kg',    r:1, v:function(x){ return (x.c&&x.c.custoKg>0)?x.c.custoKg:null; } },
+    { k:'nProd',   l:'Produtos',    r:1, v:function(x){ return x.nProd; } }
+  ];
+  ordenarPor(lista, 'receitas', cols);
+
+  var html=thead('receitas', cols)+'<tbody>';
+  if(!lista.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhuma receita encontrada.</td></tr>';
   lista.forEach(function(x){
     var c=x.c, alerta='';
     if(!c||c.semIngredientes) alerta=' <span class="pill p-warn">sem ingredientes</span>';
     else if(c.faltantes.length) alerta=' <span class="pill p-warn">'+c.faltantes.length+' MP sem preço</span>';
     html+='<tr class="clickrow" onclick="abrirReceita(\''+esc(x.tipo)+'\',\''+esc(x.r.firestoreId)+'\')">'+
-      '<td><div class="nm">'+esc(x.r.nome||'—')+'</div><div style="font-size:10.5px;color:var(--muted)" class="mono">'+esc(x.r.codigo||'')+'</div></td>'+
-      '<td><span class="pill '+(x.tipo==='massa'?'p-mut':'p-mut')+'">'+(x.tipo==='massa'?'Massa':'Recheio')+'</span></td>'+
+      '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(x.r.codigo||'—')+'</td>'+
+      '<td><div class="nm">'+esc(x.r.nome||'—')+'</div></td>'+
+      '<td><span class="pill p-mut">'+(x.tipo==='massa'?'Massa':'Recheio')+'</span></td>'+
       '<td class="r num">'+((c&&c.detalhe)?c.detalhe.length:0)+'</td>'+
       '<td class="r num">'+((c&&c.rend>0)?fmtN(c.rend,2)+' kg':'—')+(x.r.rendimentoReal>0?' <span style="font-size:10px;color:var(--muted)">real</span>':'')+'</td>'+
       '<td class="r num">'+((c&&c.custoKg>0)?fmtR$(c.custoKg):'—')+alerta+'</td>'+
-      '<td class="r num">'+(usoProd[norm(x.r.nome)]||0)+'</td>'+
-      '<td class="r" style="color:var(--muted)">›</td></tr>';
+      '<td class="r num">'+x.nProd+'</td></tr>';
   });
   document.getElementById('tbl-receitas').innerHTML=html+'</tbody>';
 }
@@ -770,19 +873,27 @@ function renderMP(){
     if(f==='manual') return x.origem==='manual';
     return true;
   });
-  lista.sort(function(a,b){ if(b.uso!==a.uso) return b.uso-a.uso; return norm(a.m.nome)<norm(b.m.nome)?-1:1; });
+  var cols=[
+    { k:'codigo', l:'Cód',                 v:function(x){ return String(x.m.codigo||''); } },
+    { k:'nome',   l:'Matéria-prima',       v:function(x){ return norm(x.m.nome); } },
+    { k:'unidade',l:'Un',                  v:function(x){ return norm(x.m.unidade||'KG'); } },
+    { k:'preco',  l:'Preço/kg',       r:1, v:function(x){ return x.preco>0?x.preco:null; } },
+    { k:'origem', l:'Origem',              v:function(x){ return x.origem; } },
+    { k:'uso',    l:'Usada em',       r:1, v:function(x){ return x.uso; } }
+  ];
+  ordenarPor(lista, 'mp', cols);
 
-  var html='<thead><tr><th>Matéria-prima</th><th>Código</th><th class="r">Preço/kg</th><th>Origem</th><th class="r">Usada em</th><th></th></tr></thead><tbody>';
-  if(!lista.length) html+='<tr><td colspan="6" class="empty">Nenhuma matéria-prima encontrada.</td></tr>';
+  var html=thead('mp', cols)+'<tbody>';
+  if(!lista.length) html+='<tr><td colspan="'+(cols.length+1)+'" class="empty">Nenhuma matéria-prima encontrada.</td></tr>';
   lista.forEach(function(x){
     var pill=x.origem==='manual'?'<span class="pill p-warn">manual</span>':(x.origem==='planilha'?'<span class="pill p-ok">planilha</span>':(x.origem==='compras'?'<span class="pill p-mut">compras</span>':'<span class="pill p-bad">sem preço</span>'));
-    html+='<tr>'+
+    html+='<tr class="clickrow" onclick="abrirMP(\''+esc(x.m.codigo)+'\')">'+
+      '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(x.m.codigo)+'</td>'+
       '<td><div class="nm">'+esc(x.m.nome||'—')+'</div>'+(x.forn?'<div style="font-size:10.5px;color:var(--muted)">'+esc(x.forn)+'</div>':'')+'</td>'+
-      '<td class="mono" style="font-size:11.5px">'+esc(x.m.codigo)+'</td>'+
+      '<td style="font-size:11.5px;color:var(--muted)">'+esc(x.m.unidade||'KG')+'</td>'+
       '<td class="r num">'+(x.preco>0?fmtR$(x.preco,3):'—')+'</td>'+
       '<td>'+pill+'</td>'+
-      '<td class="r num">'+(x.uso>0?x.uso+' receita(s)':'—')+'</td>'+
-      '<td class="r"><button class="btn btn-sm btn-ghost" onclick="abrirMP(\''+esc(x.m.codigo)+'\')">Preço</button></td></tr>';
+      '<td class="r num">'+(x.uso>0?x.uso:'—')+'</td></tr>';
   });
   document.getElementById('tbl-mp').innerHTML=html+'</tbody>';
 }
