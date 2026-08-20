@@ -103,6 +103,22 @@ th.ord-on{color:var(--primary)}
 .clickrow{cursor:pointer}
 .empty{padding:34px 18px;text-align:center;color:var(--muted);font-size:13px}
 
+/* detalhamento: tabela larga */
+.admin-only{display:none !important}
+body.is-admin .admin-only{display:block !important}
+body.is-admin button.admin-only{display:inline-flex !important;align-items:center}
+.tdet{font-size:12px}
+.tdet th,.tdet td{padding:7px 10px}
+.tdet th.grp{text-align:center;font-size:10px;letter-spacing:.8px;background:var(--card)}
+.tdet th.g1{color:var(--muted)} .tdet th.g2{color:var(--primary)} .tdet th.g3{color:var(--purple)} .tdet th.g4{color:var(--amber)}
+.tdet .sep{border-left:1px solid var(--border)}
+.tdet .stk{position:sticky;left:0;z-index:3;background:var(--card)}
+.tdet thead .stk{z-index:5;background:var(--card-2)}
+.tdet tbody tr:hover .stk{background:var(--card-2)}
+.tdet .mut{color:var(--muted)}
+.tdet .un{font-size:9.5px;color:var(--muted);font-weight:400;letter-spacing:.2px}
+.divg{color:var(--amber);font-weight:600;cursor:help}
+
 /* BITS */
 .pill{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:20px;border:1px solid}
 .p-ok{color:var(--green);border-color:var(--green);background:rgba(28,196,126,.08)}
@@ -205,6 +221,7 @@ th.ord-on{color:var(--primary)}
     <button class="navbtn" data-p="produtos" onclick="nav('produtos')"><span class="side-ico">≣</span><span class="lbl">Produtos</span></button>
     <button class="navbtn" data-p="receitas" onclick="nav('receitas')"><span class="side-ico">◈</span><span class="lbl">Receitas</span></button>
     <button class="navbtn" data-p="mp" onclick="nav('mp')"><span class="side-ico">◇</span><span class="lbl">Matérias-primas</span></button>
+    <button class="navbtn admin-only" data-p="detalhe" onclick="nav('detalhe')"><span class="side-ico">☷</span><span class="lbl">Detalhar Custo</span></button>
     <button class="navbtn" data-p="sim" onclick="nav('sim')"><span class="side-ico">⇄</span><span class="lbl">Simulação</span></button>
     <button class="navbtn" data-p="config" onclick="nav('config')"><span class="side-ico">⚙</span><span class="lbl">Configurações</span></button>
     <div class="side-foot">
@@ -255,6 +272,7 @@ th.ord-on{color:var(--primary)}
       <div class="tools">
         <input type="text" id="pr-busca" placeholder="Buscar produto..." oninput="render()" />
         <select id="pr-classe" onchange="render()"><option value="">Todas as classes</option></select>
+        <button class="btn btn-sm btn-ghost admin-only" onclick="nav('detalhe')" style="margin-left:auto;gap:6px">☷ Detalhar Custo</button>
       </div>
       <div class="tw"><div class="tscroll"><table id="tbl-produtos"></table></div></div>
     </div>
@@ -284,6 +302,26 @@ th.ord-on{color:var(--primary)}
         </select>
       </div>
       <div class="tw"><div class="tscroll"><table id="tbl-mp"></table></div></div>
+    </div>
+
+    <!-- DETALHAR CUSTO (admin) -->
+    <div class="page" id="page-detalhe">
+      <div class="alert a-info">☷ Detalhamento do custo de <strong>matéria-prima</strong> por unidade: massa e recheios abertos, com preço por kg, gramatura e custo. Mão de obra, custos fixos e embalagem não entram aqui — o total completo está no Painel.</div>
+      <div class="tools">
+        <input type="text" id="dt-busca" placeholder="Buscar produto..." oninput="render()" />
+        <select id="dt-classe" onchange="render()"><option value="">Todas as classes</option></select>
+        <select id="dt-filtro" onchange="render()">
+          <option value="">Todos</option>
+          <option value="ativos">Só ativos</option>
+          <option value="divergentes">Divergência de peso</option>
+          <option value="semcusto">Sem custo</option>
+        </select>
+        <button class="btn btn-sm btn-ghost" onclick="exportarDetalhe()" style="margin-left:auto">⤓ Exportar Excel</button>
+      </div>
+      <div class="tw"><div class="tscroll"><table class="tdet" id="tbl-detalhe"></table></div></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:9px;line-height:1.6">
+        <strong>Un/Pct calc</strong> = Peso Pct ÷ soma das gramaturas. Quando diverge do cadastro em mais de 2%, aparece em amarelo — sinal de gramatura ou peso de pacote errado no Produlog, o que distorce o custo por kg.
+      </div>
     </div>
 
     <!-- SIMULAÇÃO -->
@@ -421,11 +459,12 @@ var ord={
   painel:   { col:'margemPct', dir:1  },
   produtos: { col:'nome',      dir:1  },
   receitas: { col:'custoKg',   dir:-1 },
-  mp:       { col:'uso',       dir:-1 }
+  mp:       { col:'uso',       dir:-1 },
+  detalhe:  { col:'nome',      dir:1  }
 };
 var ultimaCarga=null;
 
-const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
+const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], detalhe:['Detalhar Custo','Composição de matéria-prima por produto'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
 
 /* ============ UTIL ============ */
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -479,6 +518,7 @@ window.togglePin=function(e){
 /* ============ NAV ============ */
 window.nav=function(p){
   if(!TITLES[p]) return;
+  if(p==='detalhe' && currentRole!=='admin') p='produtos';
   pagina=p;
   document.querySelectorAll('.page').forEach(function(el){ el.classList.remove('on'); });
   var pg=document.getElementById('page-'+p); if(pg) pg.classList.add('on');
@@ -744,6 +784,7 @@ function render(){
   else if(pagina==='receitas') renderReceitas();
   else if(pagina==='mp') renderMP();
   else if(pagina==='sim') renderSim();
+  else if(pagina==='detalhe') renderDetalhe();
   else if(pagina==='config') renderConfig();
 }
 window.render=render;
@@ -752,7 +793,7 @@ function preencherClasses(){
   var cls={};
   produtos.forEach(function(p){ if(p.classe) cls[p.classe]=1; });
   var ks=Object.keys(cls).sort();
-  ['pn-classe','pr-classe'].forEach(function(id){
+  ['pn-classe','pr-classe','dt-classe'].forEach(function(id){
     var el=document.getElementById(id); if(!el) return;
     var atual=el.value;
     el.innerHTML='<option value="">Todas as classes</option>'+ks.map(function(k){ return '<option value="'+esc(k)+'">'+esc(k)+'</option>'; }).join('');
@@ -1005,6 +1046,168 @@ function renderMP(){
   });
   document.getElementById('tbl-mp').innerHTML=html+'</tbody>';
 }
+
+/* ---- DETALHAR CUSTO (admin) ---- */
+// Monta as linhas do detalhamento: uma por produto, com massa e recheios abertos.
+function linhasDetalhe(){
+  return produtos.map(function(p){
+    var c=custoProduto(p,null);
+    var ex=c.extra||{};
+    function comp(rot){
+      var x=null;
+      c.comps.forEach(function(y){ if(y.rotulo===rot) x=y; });
+      return x;
+    }
+    var m=comp('Massa'), r1=comp('Recheio 1'), r2=comp('Recheio 2');
+    var somaGr=0; c.comps.forEach(function(x){ somaGr+=x.gramas; });
+    var pesoPct=num(p.pesoPct), qtdCad=num(p.qtdPct);
+    var qtdCalc=(pesoPct>0&&somaGr>0)?(pesoPct/somaGr):null;
+    var diverg=(qtdCalc!=null&&qtdCad>0)?Math.abs(qtdCalc/qtdCad-1)*100:null;
+    var totRech=(r1?r1.custo:0)+(r2?r2.custo:0);
+    var custoMPun=(m?m.custo:0)+totRech;      // sem perda: espelha a planilha
+    var pesoUnKg=somaGr>0?somaGr/1000:(c.pesoUnKg||0);
+    return {
+      p:p, c:c, ativo:(ex.ativo!==false), marca:ex.marca||'', embalagem:ex.embalagem||'',
+      pesoPct:pesoPct, qtdCad:qtdCad, qtdCalc:qtdCalc, diverg:diverg, somaGr:somaGr,
+      m:m, r1:r1, r2:r2, totRech:totRech,
+      custoUn:custoMPun,
+      custoPct:qtdCad>0?custoMPun*qtdCad:null,
+      custoKg:pesoUnKg>0?custoMPun/pesoUnKg:null
+    };
+  });
+}
+var COLS_DET=[
+  { g:1, k:'nome',    l:'Produto',       stk:1, v:function(x){ return norm(x.p.nome); } },
+  { g:1, k:'ativo',   l:'Ativo',                v:function(x){ return x.ativo?'Sim':'Não'; } },
+  { g:1, k:'cod',     l:'ID',                   v:function(x){ return String(x.p.cod||''); } },
+  { g:1, k:'marca',   l:'Marca',                v:function(x){ return x.marca; } },
+  { g:1, k:'emb',     l:'Embalagem',            v:function(x){ return x.embalagem; } },
+  { g:1, k:'pesoPct', l:'Peso Pct (gr)',   r:1, v:function(x){ return x.pesoPct>0?x.pesoPct:null; } },
+  { g:1, k:'qtdCad',  l:'Un/Pct',          r:1, v:function(x){ return x.qtdCad>0?x.qtdCad:null; } },
+  { g:1, k:'qtdCalc', l:'Un/Pct calc',     r:1, v:function(x){ return x.qtdCalc; } },
+  { g:2, k:'tipoMassa',l:'Tipo de Massa',  sep:1, v:function(x){ return x.m?norm(x.m.nome):''; } },
+  { g:2, k:'massaKg', l:'Massa (R$/kg)',   r:1, v:function(x){ return x.m&&x.m.custoKg>0?x.m.custoKg:null; } },
+  { g:2, k:'massaGr', l:'Massa (gr)',      r:1, v:function(x){ return x.m?x.m.gramas:null; } },
+  { g:2, k:'massaUn', l:'Custo Unid (R$)', r:1, v:function(x){ return x.m?x.m.custo:null; } },
+  { g:3, k:'tipoRech',l:'Tipo de Recheio', sep:1, v:function(x){ return x.r1?norm(x.r1.nome):''; } },
+  { g:3, k:'rechKg',  l:'Recheio (R$/kg)', r:1, v:function(x){ return x.r1&&x.r1.custoKg>0?x.r1.custoKg:null; } },
+  { g:3, k:'rechGr',  l:'Recheio (gr)',    r:1, v:function(x){ return x.r1?x.r1.gramas:null; } },
+  { g:3, k:'rechR',   l:'Recheio (R$)',    r:1, v:function(x){ return x.r1?x.r1.custo:null; } },
+  { g:3, k:'tipoRech2',l:'Recheio 2',           v:function(x){ return x.r2?norm(x.r2.nome):''; } },
+  { g:3, k:'rech2Kg', l:'Recheio 2 (R$/kg)',r:1, v:function(x){ return x.r2&&x.r2.custoKg>0?x.r2.custoKg:null; } },
+  { g:3, k:'rech2Gr', l:'Recheio 2 (gr)',  r:1, v:function(x){ return x.r2?x.r2.gramas:null; } },
+  { g:3, k:'rech2R',  l:'Recheio 2 (R$)',  r:1, v:function(x){ return x.r2?x.r2.custo:null; } },
+  { g:4, k:'totRech', l:'Total Recheios (R$)', r:1, sep:1, v:function(x){ return x.totRech>0?x.totRech:null; } },
+  { g:4, k:'custoUn', l:'Custo Unid (R$)', r:1, v:function(x){ return x.custoUn>0?x.custoUn:null; } },
+  { g:4, k:'custoPct',l:'Custo Pct (R$)',  r:1, v:function(x){ return x.custoPct; } },
+  { g:4, k:'custoKg', l:'Custo (R$/kg)',   r:1, v:function(x){ return x.custoKg; } }
+];
+function renderDetalhe(){
+  preencherClasses();
+  var q=norm(document.getElementById('dt-busca').value);
+  var cl=document.getElementById('dt-classe').value;
+  var f=document.getElementById('dt-filtro').value;
+  var lista=linhasDetalhe().filter(function(x){
+    if(q && norm(x.p.nome).indexOf(q)<0 && String(x.p.cod||'').indexOf(q)<0) return false;
+    if(cl && x.p.classe!==cl) return false;
+    if(f==='ativos') return x.ativo;
+    if(f==='divergentes') return x.diverg!=null && x.diverg>2;
+    if(f==='semcusto') return !(x.custoUn>0);
+    return true;
+  });
+  ordenarPor(lista,'detalhe',COLS_DET);
+
+  var o=ord.detalhe;
+  var grupos=[[1,'INFORMAÇÕES DO PRODUTO'],[2,'MASSA'],[3,'RECHEIO'],[4,'TOTAL']];
+  var hg='<tr>'+grupos.map(function(g){
+    var n=COLS_DET.filter(function(c){ return c.g===g[0]; }).length;
+    return '<th class="grp g'+g[0]+'" colspan="'+n+'">'+g[1]+'</th>';
+  }).join('')+'</tr>';
+  var hc='<tr>'+COLS_DET.map(function(c){
+    var on=(o.col===c.k);
+    var seta=on?(o.dir>0?' \u25b2':' \u25bc'):'<span style="opacity:.25"> \u25b4\u25be</span>';
+    return '<th class="'+(c.r?'r ':'')+(c.sep?'sep ':'')+(c.stk?'stk ':'')+'sortable'+(on?' ord-on':'')+'" onclick="ordCol(\'detalhe\',\''+c.k+'\')">'+esc(c.l)+seta+'</th>';
+  }).join('')+'</tr>';
+
+  var html='<thead>'+hg+hc+'</thead><tbody>';
+  if(!lista.length) html+='<tr><td colspan="'+COLS_DET.length+'" class="empty">Nenhum produto encontrado.</td></tr>';
+  lista.forEach(function(x){
+    var vazio='<span class="mut">—</span>';
+    // R$ como prefixo discreto; unidades como sufixo discreto
+    function mo(v,dec){ return (v!=null&&isFinite(v))?'<span class="un">R$</span> '+fmtN(v,dec==null?3:dec):vazio; }
+    function gr(v){
+      if(v==null||!isFinite(v)||v<=0) return vazio;
+      var d=(Math.abs(v)<1000 && v%1!==0)?1:0;
+      return fmtN(v,d)+' <span class="un">gr</span>';
+    }
+    function un(v,dec){ return (v!=null&&isFinite(v)&&v>0)?fmtN(v,dec==null?0:dec)+' <span class="un">un</span>':vazio; }
+    function txt(s){ return s?esc(s):vazio; }
+    var qc=vazio;
+    if(x.qtdCalc!=null){
+      var d=(x.diverg!=null&&x.diverg>2);
+      qc='<span'+(d?' class="divg" title="Cadastro diz '+fmtN(x.qtdCad,2)+' un/pct, mas Peso Pct ÷ gramaturas dá '+fmtN(x.qtdCalc,2)+' — diferença de '+fmtPct(x.diverg,1)+'"':'')+'>'+
+         fmtN(x.qtdCalc,2)+' <span class="un">un</span>'+(d?' \u26a0':'')+'</span>';
+    }
+    html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(x.p))+'\')">'+
+      '<td class="stk"><div class="nm">'+esc(x.p.nome||'—')+'</div></td>'+
+      '<td>'+(x.ativo?'Sim':'<span class="mut">Não</span>')+'</td>'+
+      '<td class="mono mut">'+esc(x.p.cod||'—')+'</td>'+
+      '<td>'+txt(x.marca)+'</td>'+
+      '<td>'+txt(x.embalagem)+'</td>'+
+      '<td class="r num">'+gr(x.pesoPct)+'</td>'+
+      '<td class="r num">'+un(x.qtdCad, x.qtdCad%1!==0?2:0)+'</td>'+
+      '<td class="r num">'+qc+'</td>'+
+      '<td class="sep">'+txt(x.m?x.m.nome:'')+'</td>'+
+      '<td class="r num">'+mo(x.m&&x.m.custoKg>0?x.m.custoKg:null)+'</td>'+
+      '<td class="r num">'+gr(x.m?x.m.gramas:null)+'</td>'+
+      '<td class="r num">'+mo(x.m?x.m.custo:null)+'</td>'+
+      '<td class="sep">'+txt(x.r1?x.r1.nome:'')+'</td>'+
+      '<td class="r num">'+mo(x.r1&&x.r1.custoKg>0?x.r1.custoKg:null)+'</td>'+
+      '<td class="r num">'+gr(x.r1?x.r1.gramas:null)+'</td>'+
+      '<td class="r num">'+mo(x.r1?x.r1.custo:null)+'</td>'+
+      '<td>'+txt(x.r2?x.r2.nome:'')+'</td>'+
+      '<td class="r num">'+mo(x.r2&&x.r2.custoKg>0?x.r2.custoKg:null)+'</td>'+
+      '<td class="r num">'+gr(x.r2?x.r2.gramas:null)+'</td>'+
+      '<td class="r num">'+mo(x.r2?x.r2.custo:null)+'</td>'+
+      '<td class="r num sep">'+mo(x.totRech>0?x.totRech:null)+'</td>'+
+      '<td class="r num" style="font-weight:600">'+mo(x.custoUn>0?x.custoUn:null)+'</td>'+
+      '<td class="r num">'+mo(x.custoPct,2)+'</td>'+
+      '<td class="r num" style="font-weight:600">'+mo(x.custoKg,2)+'</td></tr>';
+  });
+  document.getElementById('tbl-detalhe').innerHTML=html+'</tbody>';
+}
+function carregarXLSX(){
+  return new Promise(function(res,rej){
+    if(window.XLSX){ res(); return; }
+    var s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
+    s.onload=res; s.onerror=function(){ rej(new Error('Não foi possível carregar a biblioteca de Excel')); };
+    document.head.appendChild(s);
+  });
+}
+window.exportarDetalhe=function(){
+  carregarXLSX().then(function(){
+    var lista=linhasDetalhe();
+    ordenarPor(lista,'detalhe',COLS_DET);
+    var rows=lista.map(function(x){
+      var o={};
+      COLS_DET.forEach(function(c){
+        var v=c.v(x);
+        if(c.k==='nome') v=x.p.nome||'';
+        if(c.k==='tipoMassa') v=x.m?x.m.nome:'';
+        if(c.k==='tipoRech')  v=x.r1?x.r1.nome:'';
+        if(c.k==='tipoRech2') v=x.r2?x.r2.nome:'';
+        o[c.l]=(v==null||(typeof v==='number'&&!isFinite(v)))?'':v;
+      });
+      return o;
+    });
+    var ws=XLSX.utils.json_to_sheet(rows,{ header:COLS_DET.map(function(c){ return c.l; }) });
+    ws['!cols']=COLS_DET.map(function(c){ return { wch: c.k==='nome'?42:(c.k.indexOf('tipo')===0?28:13) }; });
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Custos');
+    XLSX.writeFile(wb,'detalhe-custos-'+new Date().toISOString().slice(0,10)+'.xlsx');
+  }).catch(function(e){ console.error('exportarDetalhe:',e); alert('Erro ao exportar: '+e.message); });
+};
 
 /* ---- SIMULAÇÃO ---- */
 function renderSim(){
@@ -1279,6 +1482,11 @@ window.abrirProduto=function(chave){
         '<div><label>Embalagem · R$/pacote</label><input type="number" id="pd-emb" step="0.001" value="'+(extra.embalagemPct||'')+'" '+(podeEditar?'':'disabled')+' /></div>'+
         '<div><label>Fator de mão de obra</label><input type="number" id="pd-mo" step="0.05" value="'+(extra.fatorMO||1)+'" '+(podeEditar?'':'disabled')+' />'+
           '<div class="fhint">1 = normal. Use 1,5 para produtos mais artesanais.</div></div>'+
+        '<div><label>Marca</label><input type="text" id="pd-marca" value="'+esc(extra.marca||'')+'" placeholder="Ex: MC" '+(podeEditar?'':'disabled')+' /></div>'+
+        '<div><label>Embalagem</label><input type="text" id="pd-embtipo" value="'+esc(extra.embalagem||'')+'" placeholder="Ex: Sc 31x31" '+(podeEditar?'':'disabled')+' /></div>'+
+        '<div><label>Situação</label><select id="pd-ativo" '+(podeEditar?'':'disabled')+'>'+
+          '<option value="1"'+(extra.ativo!==false?' selected':'')+'>Ativo</option>'+
+          '<option value="0"'+(extra.ativo===false?' selected':'')+'>Inativo</option></select></div>'+
       '</div>'+
       '<div class="fld" style="margin-top:12px"><label>Observação</label><input type="text" id="pd-obs" value="'+esc(extra.obs||'')+'" '+(podeEditar?'':'disabled')+' /></div>',
     ok: podeEditar?'Salvar':null,
@@ -1289,6 +1497,9 @@ window.abrirProduto=function(chave){
         baseVenda:document.getElementById('pd-base').value,
         embalagemPct:num(document.getElementById('pd-emb').value),
         fatorMO:num(document.getElementById('pd-mo').value)||1,
+        marca:document.getElementById('pd-marca').value||'',
+        embalagem:document.getElementById('pd-embtipo').value||'',
+        ativo:document.getElementById('pd-ativo').value==='1',
         obs:document.getElementById('pd-obs').value||'',
         atualizadoEm:agora(), atualizadoPor:sessaoEmail
       };
@@ -1395,6 +1606,8 @@ function liberar(d){
   document.getElementById('uname').textContent=nome;
   document.getElementById('urole').textContent=(currentRole==='admin'?'Administrador':(podeEditar?'Custos · edição':'Custos · leitura'));
   document.getElementById('uavatar').textContent=(nome||'?').trim().charAt(0).toUpperCase();
+  document.body.classList.toggle('is-admin', currentRole==='admin');
+  if(pagina==='detalhe' && currentRole!=='admin') nav('produtos');
 
   // COMODATO (leitura + escrita)
   if(!subs.cfg) subs.cfg=onSnapshot(doc(dbC,'custosConfig','app'), function(s){
