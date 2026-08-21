@@ -123,6 +123,15 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
 .tdet tbody tr:hover .stk{background:var(--card-2)}
 .tdet .mut{color:var(--muted)}
 .tdet .un{font-size:9.5px;color:var(--muted);font-weight:400;letter-spacing:.2px}
+
+/* cursor de teclado (mesmo padrão do Planner) */
+.cel-sel{outline:2px solid var(--primary);outline-offset:-2px;border-radius:4px}
+.linha-sel > td{background:rgba(47,174,125,.10)!important}
+.cel-edit{width:100%;padding:3px 6px;font-size:12.5px;font-family:'JetBrains Mono',monospace;border:1px solid var(--primary);border-radius:5px;background:var(--bg);color:var(--text)}
+.kbd{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:2px 6px;border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;background:var(--card-2);color:var(--text);white-space:nowrap}
+.kbdrow{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px dashed var(--border);font-size:12.5px}
+.kbdrow:last-child{border-bottom:none}
+.kbdrow .k{flex:0 0 132px;text-align:right}
 .divg{color:var(--amber);font-weight:600;cursor:help}
 
 /* BITS */
@@ -251,6 +260,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
           <button class="warnbtn" id="warnBtn" onclick="toggleAvisos(event)" title="Pendências">&#9888;<span class="warnbadge" id="warnBadge">0</span></button>
           <div class="warnpop" id="warnPop"></div>
         </div>
+        <button class="btn btn-sm btn-ghost" onclick="abrirAtalhos()" title="Atalhos de teclado (?)" style="padding:4px 9px;font-size:12px">⌨</button>
         <div id="freshness" style="font-size:11px;color:var(--muted)"></div>
       </div>
     </div>
@@ -534,6 +544,7 @@ window.nav=function(p){
   document.getElementById('ptitle').textContent=TITLES[p][0];
   document.getElementById('psub').textContent=TITLES[p][1];
   try{ localStorage.setItem('mc_custos_page',p); }catch(e){}
+  if(typeof grid!=='undefined'){ grid.row=-1; grid.col=-1; grid.modo='celula'; grid.editando=false; _edit=null; }
   window.scrollTo(0,0);
   render();
 };
@@ -819,6 +830,7 @@ function render(){
   else if(pagina==='sim') renderSim();
   else if(pagina==='detalhe') renderDetalhe();
   else if(pagina==='config') renderConfig();
+  if(typeof aplicarCursor==='function' && !grid.editando) aplicarCursor();
 }
 window.render=render;
 
@@ -833,6 +845,46 @@ function preencherClasses(){
     if(atual) el.value=atual;
   });
 }
+
+var COLS_PAINEL=[
+  { k:'cod',        l:'Cód',            v:function(c){ return String(c.p.cod||''); } },
+  { k:'nome',       l:'Produto',        v:function(c){ return norm(c.p.nome); } },
+  { k:'classe',     l:'Classe',         v:function(c){ return norm(c.p.classe); } },
+  { k:'custoUn',    l:'Custo/un',  r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
+  { k:'custoKg',    l:'Custo/kg',  r:1, v:function(c){ return c.custoKg; } },
+  { k:'precoVendaUn',l:'Venda/un', r:1, v:function(c){ return c.precoVendaUn; } },
+  { k:'mcPct',      l:'Mg contrib.',r:1,v:function(c){ return c.mcPct; } },
+  { k:'margemPct',  l:'Mg líq.',   r:1, v:function(c){ return c.margemPct; } },
+  { k:'markup',     l:'Markup',    r:1, v:function(c){ return c.markup; } }
+];
+var COLS_PRODUTOS=[
+  { k:'cod',      l:'Cód',              v:function(c){ return String(c.p.cod||''); } },
+  { k:'nome',     l:'Produto',          v:function(c){ return norm(c.p.nome); } },
+  { k:'classe',   l:'Classe',           v:function(c){ return norm(c.p.classe); } },
+  { k:'ficha',    l:'Ficha (massa · recheios)', v:function(c){ return c.comps.length; } },
+  { k:'pesoUnG',  l:'Peso/un',     r:1, v:function(c){ return c.pesoUnG>0?c.pesoUnG:null; } },
+  { k:'qtdPct',   l:'Un/pct',      r:1, v:function(c){ return c.qtdPct>0?c.qtdPct:null; } },
+  { k:'custoUn',  l:'Custo/un',    r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
+  { k:'precoVendaBruto', l:'Venda', r:1, v:function(c){ return c.temPreco?c.precoVendaBruto:null; } },
+  { k:'margemPct',l:'Margem',      r:1, v:function(c){ return c.margemPct; } }
+];
+var COLS_RECEITAS=[
+  { k:'codigo',  l:'Cód',              v:function(x){ return String(x.r.codigo||''); } },
+  { k:'nome',    l:'Receita',          v:function(x){ return norm(x.r.nome); } },
+  { k:'tipo',    l:'Tipo',             v:function(x){ return x.tipo; } },
+  { k:'nIng',    l:'Ingred.',     r:1, v:function(x){ return (x.c&&x.c.detalhe)?x.c.detalhe.length:0; } },
+  { k:'rend',    l:'Rendimento',  r:1, v:function(x){ return (x.c&&x.c.rend>0)?x.c.rend:null; } },
+  { k:'custoKg', l:'Custo/kg',    r:1, v:function(x){ return (x.c&&x.c.custoKg>0)?x.c.custoKg:null; } },
+  { k:'nProd',   l:'Produtos',    r:1, v:function(x){ return x.nProd; } }
+];
+var COLS_MP=[
+  { k:'codigo', l:'Cód',                 v:function(x){ return String(x.m.codigo||''); } },
+  { k:'nome',   l:'Matéria-prima',       v:function(x){ return norm(x.m.nome); } },
+  { k:'unidade',l:'Un',                  v:function(x){ return norm(x.m.unidade||'KG'); } },
+  { k:'preco',  l:'Preço/kg',       r:1, v:function(x){ return x.preco>0?x.preco:null; } },
+  { k:'origem', l:'Origem',              v:function(x){ return x.origem; } },
+  { k:'uso',    l:'Usada em',       r:1, v:function(x){ return x.uso; } }
+];
 
 /* ---- PAINEL ---- */
 function renderPainel(){
@@ -875,23 +927,13 @@ function renderPainel(){
     if(f==='incompleto') return c.fichaIncompleta;
     return true;
   });
-  var cols=[
-    { k:'cod',        l:'Cód',            v:function(c){ return String(c.p.cod||''); } },
-    { k:'nome',       l:'Produto',        v:function(c){ return norm(c.p.nome); } },
-    { k:'classe',     l:'Classe',         v:function(c){ return norm(c.p.classe); } },
-    { k:'custoUn',    l:'Custo/un',  r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
-    { k:'custoKg',    l:'Custo/kg',  r:1, v:function(c){ return c.custoKg; } },
-    { k:'precoVendaUn',l:'Venda/un', r:1, v:function(c){ return c.precoVendaUn; } },
-    { k:'mcPct',      l:'Mg contrib.',r:1,v:function(c){ return c.mcPct; } },
-    { k:'margemPct',  l:'Mg líq.',   r:1, v:function(c){ return c.margemPct; } },
-    { k:'markup',     l:'Markup',    r:1, v:function(c){ return c.markup; } }
-  ];
+  var cols=COLS_PAINEL;
   ordenarPor(lista, 'painel', cols);
 
   var html=thead('painel', cols)+'<tbody>';
   if(!lista.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhum produto encontrado.</td></tr>';
   lista.forEach(function(c){
-    html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
+    html+='<tr class="clickrow" data-k="'+esc(chaveProduto(c.p))+'" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
       '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
       '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
@@ -964,17 +1006,7 @@ function renderProdutos(){
     if(cl && c.p.classe!==cl) return false;
     return true;
   });
-  var cols=[
-    { k:'cod',      l:'Cód',              v:function(c){ return String(c.p.cod||''); } },
-    { k:'nome',     l:'Produto',          v:function(c){ return norm(c.p.nome); } },
-    { k:'classe',   l:'Classe',           v:function(c){ return norm(c.p.classe); } },
-    { k:'ficha',    l:'Ficha (massa · recheios)', v:function(c){ return c.comps.length; } },
-    { k:'pesoUnG',  l:'Peso/un',     r:1, v:function(c){ return c.pesoUnG>0?c.pesoUnG:null; } },
-    { k:'qtdPct',   l:'Un/pct',      r:1, v:function(c){ return c.qtdPct>0?c.qtdPct:null; } },
-    { k:'custoUn',  l:'Custo/un',    r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
-    { k:'precoVendaBruto', l:'Venda', r:1, v:function(c){ return c.temPreco?c.precoVendaBruto:null; } },
-    { k:'margemPct',l:'Margem',      r:1, v:function(c){ return c.margemPct; } }
-  ];
+  var cols=COLS_PRODUTOS;
   ordenarPor(todos, 'produtos', cols);
 
   var html=thead('produtos', cols)+'<tbody>';
@@ -988,7 +1020,7 @@ function renderProdutos(){
         ? ' <span class="pill p-warn" title="Gramatura não preenchida no Produlog — este componente não entra no custo">sem gramatura</span>'
         : ' <span class="mono" style="color:var(--muted)">'+fmtN(x.gramas,1)+'g</span>');
     }).join(' + ')||'<span class="pill p-warn">sem ficha</span>';
-    html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
+    html+='<tr class="clickrow" data-k="'+esc(chaveProduto(c.p))+'" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
       '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
       '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
@@ -1018,15 +1050,7 @@ function renderReceitas(){
   });
   lista.forEach(function(x){ x.nProd=usoProd[norm(x.r.nome)]||0; });
 
-  var cols=[
-    { k:'codigo',  l:'Cód',              v:function(x){ return String(x.r.codigo||''); } },
-    { k:'nome',    l:'Receita',          v:function(x){ return norm(x.r.nome); } },
-    { k:'tipo',    l:'Tipo',             v:function(x){ return x.tipo; } },
-    { k:'nIng',    l:'Ingred.',     r:1, v:function(x){ return (x.c&&x.c.detalhe)?x.c.detalhe.length:0; } },
-    { k:'rend',    l:'Rendimento',  r:1, v:function(x){ return (x.c&&x.c.rend>0)?x.c.rend:null; } },
-    { k:'custoKg', l:'Custo/kg',    r:1, v:function(x){ return (x.c&&x.c.custoKg>0)?x.c.custoKg:null; } },
-    { k:'nProd',   l:'Produtos',    r:1, v:function(x){ return x.nProd; } }
-  ];
+  var cols=COLS_RECEITAS;
   ordenarPor(lista, 'receitas', cols);
 
   var html=thead('receitas', cols)+'<tbody>';
@@ -1035,7 +1059,7 @@ function renderReceitas(){
     var c=x.c, alerta='';
     if(!c||c.semIngredientes) alerta=' <span class="pill p-warn">sem ingredientes</span>';
     else if(c.faltantes.length) alerta=' <span class="pill p-warn">'+c.faltantes.length+' MP sem preço</span>';
-    html+='<tr class="clickrow" onclick="abrirReceita(\''+esc(x.tipo)+'\',\''+esc(x.r.firestoreId)+'\')">'+
+    html+='<tr class="clickrow" data-k="'+esc(x.tipo+'|'+x.r.firestoreId)+'" onclick="abrirReceita(\''+esc(x.tipo)+'\',\''+esc(x.r.firestoreId)+'\')">'+
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(x.r.codigo||'—')+'</td>'+
       '<td><div class="nm">'+esc(x.r.nome||'—')+'</div></td>'+
       '<td><span class="pill p-mut">'+(x.tipo==='massa'?'Massa':'Recheio')+'</span></td>'+
@@ -1062,21 +1086,14 @@ function renderMP(){
     if(f==='manual') return x.origem==='manual';
     return true;
   });
-  var cols=[
-    { k:'codigo', l:'Cód',                 v:function(x){ return String(x.m.codigo||''); } },
-    { k:'nome',   l:'Matéria-prima',       v:function(x){ return norm(x.m.nome); } },
-    { k:'unidade',l:'Un',                  v:function(x){ return norm(x.m.unidade||'KG'); } },
-    { k:'preco',  l:'Preço/kg',       r:1, v:function(x){ return x.preco>0?x.preco:null; } },
-    { k:'origem', l:'Origem',              v:function(x){ return x.origem; } },
-    { k:'uso',    l:'Usada em',       r:1, v:function(x){ return x.uso; } }
-  ];
+  var cols=COLS_MP;
   ordenarPor(lista, 'mp', cols);
 
   var html=thead('mp', cols)+'<tbody>';
   if(!lista.length) html+='<tr><td colspan="'+(cols.length+1)+'" class="empty">Nenhuma matéria-prima encontrada.</td></tr>';
   lista.forEach(function(x){
     var pill=x.origem==='manual'?'<span class="pill p-warn">manual</span>':(x.origem==='planilha'?'<span class="pill p-ok">planilha</span>':(x.origem==='compras'?'<span class="pill p-mut">compras</span>':'<span class="pill p-bad">sem preço</span>'));
-    html+='<tr class="clickrow" onclick="abrirMP(\''+esc(x.m.codigo)+'\')">'+
+    html+='<tr class="clickrow" data-k="'+esc(x.m.codigo)+'" onclick="abrirMP(\''+esc(x.m.codigo)+'\')">'+
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(x.m.codigo)+'</td>'+
       '<td><div class="nm">'+esc(x.m.nome||'—')+'</div>'+(x.forn?'<div style="font-size:10.5px;color:var(--muted)">'+esc(x.forn)+'</div>':'')+'</td>'+
       '<td style="font-size:11.5px;color:var(--muted)">'+esc(x.m.unidade||'KG')+'</td>'+
@@ -1201,7 +1218,7 @@ function renderDetalhe(){
       qc='<span'+(d?' class="divg" title="Cadastro diz '+fmtN(x.qtdCad,2)+' un/pct, mas Peso Pct ÷ gramaturas dá '+fmtN(x.qtdCalc,2)+' — diferença de '+fmtPct(x.diverg,1)+'"':'')+'>'+
          fmtN(x.qtdCalc,2)+' <span class="un">un</span>'+(d?' \u26a0':'')+'</span>';
     }
-    html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(x.p))+'\')">'+
+    html+='<tr class="clickrow" data-k="'+esc(chaveProduto(x.p))+'" onclick="abrirProduto(\''+esc(chaveProduto(x.p))+'\')">'+
       '<td class="stk"><div class="nm">'+esc(x.p.nome||'—')+'</div></td>'+
       '<td>'+(x.ativo?'Sim':'<span class="mut">Não</span>')+'</td>'+
       '<td class="mono mut">'+esc(x.p.cod||'—')+'</td>'+
@@ -1716,6 +1733,235 @@ function ligarProdulog(){
     produtos=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
   }, function(e){ console.warn('produtosConfeitaria:',e.code||e.message); });
 }
+
+
+/* ============ TECLADO (mesmo padrão do Planner) ============ */
+var grid={ tab:null, row:-1, col:-1, modo:'celula', editando:false };
+var _edit=null;
+
+var TABS={
+  painel:  { tbl:'tbl-prod',     cols:function(){ return COLS_PAINEL; },   busca:'pn-busca', abrir:function(k){ abrirProduto(k); } },
+  produtos:{ tbl:'tbl-produtos', cols:function(){ return COLS_PRODUTOS; }, busca:'pr-busca', abrir:function(k){ abrirProduto(k); } },
+  receitas:{ tbl:'tbl-receitas', cols:function(){ return COLS_RECEITAS; }, busca:'rc-busca', abrir:function(k){ var q=k.split('|'); abrirReceita(q[0],q[1]); } },
+  mp:      { tbl:'tbl-mp',       cols:function(){ return COLS_MP; },       busca:'mp-busca', abrir:function(k){ abrirMP(k); } },
+  detalhe: { tbl:'tbl-detalhe',  cols:function(){ return COLS_DET; },      busca:'dt-busca', abrir:function(k){ abrirProduto(k); } }
+};
+// Colunas editáveis direto na célula. Só onde o Custos é dono do dado (Comodato):
+// ficha técnica e preço de compra vêm do Produlog e não se editam aqui.
+var EDITAVEIS={
+  produtos:{
+    precoVendaBruto:{ tipo:'num', ler:function(k){ var e=cfgProduto[k]||{}; return num(e.precoVenda)||''; },
+      salvar:function(k,v){ salvarProdutoCampos(k,{ precoVenda:num(v) }); } }
+  },
+  mp:{
+    preco:{ tipo:'num', ler:function(k){ var o=cfgMP[k]||{}; return num(o.precoKg)||''; },
+      salvar:function(k,v){ salvarPrecoMPRapido(k,num(v)); } }
+  },
+  detalhe:{
+    marca:{ tipo:'txt', ler:function(k){ return (cfgProduto[k]||{}).marca||''; },
+      salvar:function(k,v){ salvarProdutoCampos(k,{ marca:String(v||'') }); } },
+    emb:{ tipo:'txt', ler:function(k){ return (cfgProduto[k]||{}).embalagem||''; },
+      salvar:function(k,v){ salvarProdutoCampos(k,{ embalagem:String(v||'') }); } },
+    ativo:{ tipo:'sel', opcoes:[['1','Ativo'],['0','Inativo']],
+      ler:function(k){ return ((cfgProduto[k]||{}).ativo===false)?'0':'1'; },
+      salvar:function(k,v){ salvarProdutoCampos(k,{ ativo:(v==='1') }); } }
+  }
+};
+function salvarProdutoCampos(chave, campos){
+  var p=null;
+  for(var i=0;i<produtos.length;i++){ if(chaveProduto(produtos[i])===chave){ p=produtos[i]; break; } }
+  if(!p) return;
+  var dados=Object.assign({ cod:(p.cod!=null?String(p.cod):''), nome:p.nome||'' }, campos,
+    { atualizadoEm:agora(), atualizadoPor:sessaoEmail });
+  setDoc(doc(dbC,'custosProduto',chave), dados, { merge:true })
+    .catch(function(e){ console.error('salvarProdutoCampos:',e); alert('Erro ao salvar: '+(e.code||e.message)); });
+}
+function salvarPrecoMPRapido(codigo, v){
+  var m=null;
+  for(var i=0;i<mps.length;i++){ if(String(mps[i].codigo)===String(codigo)){ m=mps[i]; break; } }
+  var ov=cfgMP[String(codigo)]||{};
+  setDoc(doc(dbC,'custosMP',String(codigo)),
+    { codigo:String(codigo), nome:(m?m.nome:'')||'', precoKg:num(v), obs:ov.obs||'',
+      atualizadoEm:agora(), atualizadoPor:sessaoEmail }, { merge:true })
+    .catch(function(e){ console.error('salvarPrecoMPRapido:',e); alert('Erro ao salvar: '+(e.code||e.message)); });
+}
+function ehCampo(t){ return t && (t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable); }
+function modalAberto(){ return document.querySelector('#modal-host .mask'); }
+function gridLinhas(){
+  var t=TABS[pagina]; if(!t) return [];
+  var el=document.getElementById(t.tbl); if(!el) return [];
+  return el.querySelectorAll('tbody tr[data-k]');
+}
+function aplicarCursor(){
+  document.querySelectorAll('.cel-sel').forEach(function(el){ el.classList.remove('cel-sel'); });
+  document.querySelectorAll('.linha-sel').forEach(function(el){ el.classList.remove('linha-sel'); });
+  if(grid.row<0) return;
+  var linhas=gridLinhas();
+  if(!linhas.length){ grid.row=-1; grid.col=-1; return; }
+  if(grid.row>linhas.length-1) grid.row=linhas.length-1;   // a lista pode ter encurtado
+  var linha=linhas[grid.row]; if(!linha) return;
+  if(grid.modo==='linha'){ linha.classList.add('linha-sel'); }
+  else {
+    if(grid.col<0) grid.col=0;
+    var max=linha.children.length-1;
+    if(grid.col>max) grid.col=max;
+    var cel=linha.children[grid.col];
+    if(cel) cel.classList.add('cel-sel');
+  }
+  try{ linha.scrollIntoView({ block:'nearest', inline:'nearest' }); }catch(e){}
+}
+function editarCelula(){
+  if(grid.editando) return;
+  if(!podeEditar){ toast('Sem permissão para editar'); return; }
+  var t=TABS[pagina]; if(!t) return;
+  var linhas=gridLinhas(); var linha=linhas[grid.row]; if(!linha) return;
+  var cols=t.cols(); var col=cols[grid.col];
+  var mapa=EDITAVEIS[pagina]||{};
+  var def=col?mapa[col.k]:null;
+  if(!def){ t.abrir(linha.getAttribute('data-k')); return; }   // não editável: abre o detalhe
+  var cel=linha.children[grid.col]; if(!cel) return;
+  var chave=linha.getAttribute('data-k');
+
+  grid.editando=true;
+  _edit={ cel:cel, html:cel.innerHTML, chave:chave, def:def, pagina:pagina };
+  var campo;
+  if(def.tipo==='sel'){
+    campo=document.createElement('select');
+    campo.innerHTML=def.opcoes.map(function(o){ return '<option value="'+o[0]+'">'+o[1]+'</option>'; }).join('');
+    campo.value=def.ler(chave);
+  } else {
+    campo=document.createElement('input');
+    campo.type=(def.tipo==='num')?'number':'text';
+    if(def.tipo==='num') campo.step='0.001';
+    campo.value=def.ler(chave);
+  }
+  campo.className='cel-edit';
+  cel.innerHTML='';
+  cel.appendChild(campo);
+  campo.focus();
+  if(campo.select){ try{ campo.select(); }catch(err){} }
+  campo.addEventListener('keydown', function(ev){
+    if(ev.key==='Enter'){ ev.preventDefault(); confirmarEdicao(); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); cancelarEdicao(); }
+    else if(ev.key==='Tab'){ ev.preventDefault(); confirmarEdicao(); moverCol(ev.shiftKey?-1:1); editarCelula(); }
+  });
+  campo.addEventListener('blur', function(){ if(grid.editando) confirmarEdicao(); });
+}
+function confirmarEdicao(){
+  if(!grid.editando||!_edit) return;
+  var campo=_edit.cel.querySelector('.cel-edit');
+  var v=campo?campo.value:null;
+  var e=_edit;
+  grid.editando=false; _edit=null;
+  e.cel.innerHTML=e.html;
+  if(v!=null) e.def.salvar(e.chave, v);
+  aplicarCursor();
+}
+function cancelarEdicao(){
+  if(!grid.editando||!_edit) return;
+  _edit.cel.innerHTML=_edit.html;
+  grid.editando=false; _edit=null;
+  aplicarCursor();
+}
+function moverCol(d){
+  var t=TABS[pagina]; if(!t) return;
+  var linhas=gridLinhas(); var linha=linhas[grid.row]; if(!linha) return;
+  var max=linha.children.length-1;
+  grid.col=Math.max(0, Math.min((grid.col<0?0:grid.col)+d, max));
+  aplicarCursor();
+}
+function toast(msg){
+  var d=document.createElement('div');
+  d.textContent=msg;
+  d.style.cssText='position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);color:var(--text);padding:9px 15px;border-radius:9px;font-size:12.5px;z-index:300;box-shadow:var(--shadow)';
+  document.body.appendChild(d);
+  setTimeout(function(){ d.remove(); }, 1900);
+}
+window.abrirAtalhos=function(){
+  var L=[
+    ['\u2191 \u2193','Move o cursor entre as linhas'],
+    ['\u2190 \u2192','Move entre as colunas'],
+    ['Shift + Espa\u00e7o','Seleciona a linha inteira'],
+    ['F2','Edita a c\u00e9lula \u2014 ou abre o detalhe, se a coluna n\u00e3o for edit\u00e1vel'],
+    ['Enter','Abre o detalhe da linha'],
+    ['Tab','Salva e vai para a pr\u00f3xima coluna (durante a edi\u00e7\u00e3o)'],
+    ['Esc','Cancela a edi\u00e7\u00e3o \u203a fecha o modal \u203a solta o cursor'],
+    ['/','Vai para a busca'],
+    ['1 \u2026 6','Troca de tela'],
+    ['?','Mostra esta lista']
+  ];
+  modal({ titulo:'Atalhos de teclado', sub:'Os mesmos do Planner',
+    body:'<div style="font-size:11px;color:var(--muted);margin-bottom:9px">Colunas edit\u00e1veis: <strong>Venda</strong> (Produtos), <strong>Pre\u00e7o/kg</strong> (Mat\u00e9rias-primas), <strong>Marca</strong>, <strong>Embalagem</strong> e <strong>Ativo</strong> (Detalhar Custo). Ficha t\u00e9cnica e pre\u00e7o de compra v\u00eam do Produlog.</div>'+
+      L.map(function(x){ return '<div class="kbdrow"><div class="k"><span class="kbd">'+x[0]+'</span></div><div>'+x[1]+'</div></div>'; }).join('') });
+};
+var PAGS_NUM=['painel','produtos','receitas','mp','sim','config'];
+
+document.addEventListener('keydown', function(e){
+  // Esc: cancela edição > fecha modal > solta o cursor
+  if(e.key==='Escape'){
+    if(grid.editando){ e.preventDefault(); cancelarEdicao(); return; }
+    var m=modalAberto();
+    if(m){ e.preventDefault(); fecharModal(); return; }
+    if(ehCampo(e.target)){ e.target.blur(); return; }
+    if(grid.row>=0){ e.preventDefault(); grid.row=-1; grid.col=-1; grid.modo='celula'; aplicarCursor(); }
+    return;
+  }
+  if(grid.editando) return;                       // o campo cuida das próprias teclas
+
+  // "/" vai para a busca da tela atual
+  if(e.key==='/' && !ehCampo(e.target) && !modalAberto()){
+    var t0=TABS[pagina];
+    if(t0){ var b=document.getElementById(t0.busca); if(b){ e.preventDefault(); b.focus(); b.select(); return; } }
+  }
+  // "?" abre a ajuda
+  if(e.key==='?' && !ehCampo(e.target) && !modalAberto()){ e.preventDefault(); abrirAtalhos(); return; }
+
+  if(ehCampo(e.target) || modalAberto()) return;
+
+  // 1..6 troca de tela
+  if(!e.ctrlKey && !e.metaKey && !e.altKey && /^[1-6]$/.test(e.key)){
+    e.preventDefault(); nav(PAGS_NUM[parseInt(e.key,10)-1]); return;
+  }
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+
+  var t=TABS[pagina]; if(!t) return;
+  var linhas=gridLinhas(); if(!linhas.length) return;
+
+  var setas=['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'];
+  if(setas.indexOf(e.key)>=0){
+    e.preventDefault();
+    if(grid.row<0){ grid.row=0; grid.col=0; grid.modo='celula'; aplicarCursor(); return; }
+    if(e.key==='ArrowDown')      grid.row=Math.min(grid.row+1, linhas.length-1);
+    else if(e.key==='ArrowUp')   grid.row=Math.max(grid.row-1, 0);
+    else if(e.key==='ArrowRight'||e.key==='ArrowLeft'){
+      if(grid.modo==='linha'){ grid.modo='celula'; if(grid.col<0) grid.col=0; }
+      else { moverCol(e.key==='ArrowRight'?1:-1); return; }
+    }
+    aplicarCursor();
+    return;
+  }
+  if(grid.row<0) return;
+
+  // Shift+Espaço alterna linha inteira / célula (preventDefault senão rola a página)
+  if(e.code==='Space' && e.shiftKey){
+    e.preventDefault();
+    grid.modo=(grid.modo==='linha')?'celula':'linha';
+    if(grid.modo==='celula' && grid.col<0) grid.col=0;
+    aplicarCursor();
+    return;
+  }
+  if(e.key==='F2'){
+    e.preventDefault();
+    if(grid.modo==='linha'){ grid.modo='celula'; if(grid.col<0) grid.col=0; aplicarCursor(); }
+    editarCelula();
+    return;
+  }
+  if(e.key==='Enter'){
+    e.preventDefault();
+    var k=linhas[grid.row] && linhas[grid.row].getAttribute('data-k');
+    if(k) t.abrir(k);
+  }
+});
 
 /* ============ AUTH ============ */
 var overlay=document.getElementById('authOverlay');
