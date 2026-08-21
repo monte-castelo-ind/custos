@@ -132,7 +132,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
 .tdet{font-size:12px}
 .tdet th,.tdet td{padding:7px 10px}
 .tdet th.grp{text-align:center;font-size:10px;letter-spacing:.8px;background:var(--card)}
-.tdet th.g1{color:var(--muted)} .tdet th.g2{color:var(--primary)} .tdet th.g3{color:var(--purple)} .tdet th.g4{color:var(--amber)}
+.tdet th.g1{color:var(--muted)} .tdet th.g2{color:var(--primary)} .tdet th.g3{color:var(--purple)} .tdet th.g4{color:var(--blue)} .tdet th.g5{color:var(--amber)}
 .tdet .sep{border-left:1px solid var(--border)}
 .tdet .stk{position:sticky;left:0;z-index:3;background:var(--card)}
 .tdet thead .stk{background:var(--card-2)}
@@ -374,7 +374,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
 
     <!-- DETALHAR CUSTO (admin) -->
     <div class="page" id="page-detalhe">
-      <div class="alert a-info">☷ Detalhamento do custo de <strong>matéria-prima</strong> por unidade: massa e recheios abertos, com preço por kg, gramatura e custo. Mão de obra, custos fixos e embalagem não entram aqui — o total completo está no Painel.</div>
+      <div class="alert a-info">☷ Custo de <strong>matéria-prima e embalagem</strong> por unidade, com massa e recheios abertos. Mão de obra e custos fixos não entram aqui — o total completo está no Painel.</div>
       <div class="tools">
         <input type="text" id="dt-busca" placeholder="Buscar produto..." oninput="render()" />
         <div class="filtro-wrap" id="dtFiltroWrap">
@@ -1274,13 +1274,17 @@ function linhasDetalhe(){
     var totRech=(r1?r1.custo:0)+(r2?r2.custo:0);
     var custoMPun=(m?m.custo:0)+totRech;      // sem perda: espelha a planilha
     var pesoUnKg=somaGr>0?somaGr/1000:(c.pesoUnKg||0);
+    var embPu=c.embCod?precoBaseEmb(c.embCod).preco:0;
     return {
       p:p, c:c, ativo:(ex.ativo!==false), marca:ex.marca||'', embalagem:ex.embalagem||'',
+      embCod:c.embCod||'', embNome:c.embNome||'', embQtd:c.embQtd, embPu:embPu,
+      embPorPct:num(c.embPct), embPorUn:num(c.custoEmb), embOrigem:c.embOrigem, embFonte:c.embFonte,
       pesoPct:pesoPct, qtdCad:qtdCad, qtdCalc:qtdCalc, diverg:diverg, somaGr:somaGr,
       m:m, r1:r1, r2:r2, totRech:totRech,
       custoUn:custoMPun,
       custoPct:qtdCad>0?custoMPun*qtdCad:null,
-      custoKg:pesoUnKg>0?custoMPun/pesoUnKg:null
+      custoKg:pesoUnKg>0?custoMPun/pesoUnKg:null,
+      custoComEmb:custoMPun+num(c.custoEmb)
     };
   });
 }
@@ -1289,7 +1293,6 @@ var COLS_DET=[
   { g:1, k:'ativo',   l:'Ativo',                v:function(x){ return x.ativo?'Sim':'Não'; } },
   { g:1, k:'cod',     l:'ID',                   v:function(x){ return String(x.p.cod||''); } },
   { g:1, k:'marca',   l:'Marca',                v:function(x){ return x.marca; } },
-  { g:1, k:'emb',     l:'Embalagem',            v:function(x){ return x.embalagem; } },
   { g:1, k:'pesoPct', l:'Peso Pct (gr)',   r:1, v:function(x){ return x.pesoPct>0?x.pesoPct:null; } },
   { g:1, k:'qtdCad',  l:'Un/Pct',          r:1, v:function(x){ return x.qtdCad>0?x.qtdCad:null; } },
   { g:1, k:'qtdCalc', l:'Un/Pct calc',     r:1, v:function(x){ return x.qtdCalc; } },
@@ -1305,10 +1308,15 @@ var COLS_DET=[
   { g:3, k:'rech2Kg', l:'Recheio 2 (R$/kg)',r:1, v:function(x){ return x.r2&&x.r2.custoKg>0?x.r2.custoKg:null; } },
   { g:3, k:'rech2Gr', l:'Recheio 2 (gr)',  r:1, v:function(x){ return x.r2?x.r2.gramas:null; } },
   { g:3, k:'rech2R',  l:'Recheio 2 (R$)',  r:1, v:function(x){ return x.r2?x.r2.custo:null; } },
-  { g:4, k:'totRech', l:'Total Recheios (R$)', r:1, sep:1, v:function(x){ return x.totRech>0?x.totRech:null; } },
-  { g:4, k:'custoUn', l:'Custo Unid (R$)', r:1, v:function(x){ return x.custoUn>0?x.custoUn:null; } },
-  { g:4, k:'custoPct',l:'Custo Pct (R$)',  r:1, v:function(x){ return x.custoPct; } },
-  { g:4, k:'custoKg', l:'Custo (R$/kg)',   r:1, v:function(x){ return x.custoKg; } }
+  { g:4, k:'embNome', l:'Embalagem',      sep:1, v:function(x){ return norm(x.embNome); } },
+  { g:4, k:'embPu',   l:'Emb (R$/un)',     r:1, v:function(x){ return x.embPu>0?x.embPu:null; } },
+  { g:4, k:'embQtd',  l:'Emb/pct',         r:1, v:function(x){ return x.embCod?x.embQtd:null; } },
+  { g:4, k:'embPorUn',l:'Emb Unid (R$)',   r:1, v:function(x){ return x.embPorUn>0?x.embPorUn:null; } },
+  { g:5, k:'totRech', l:'Total Recheios (R$)', r:1, sep:1, v:function(x){ return x.totRech>0?x.totRech:null; } },
+  { g:5, k:'custoUn', l:'Custo MP Unid (R$)', r:1, v:function(x){ return x.custoUn>0?x.custoUn:null; } },
+  { g:5, k:'custoComEmb', l:'Custo MP+Emb (R$)', r:1, v:function(x){ return x.custoComEmb>0?x.custoComEmb:null; } },
+  { g:5, k:'custoPct',l:'Custo Pct (R$)',  r:1, v:function(x){ return x.custoPct; } },
+  { g:5, k:'custoKg', l:'Custo (R$/kg)',   r:1, v:function(x){ return x.custoKg; } }
 ];
 /* Filtros combináveis: dentro do grupo é OU, entre grupos é E. */
 var fDet={ situacao:[], problema:[], classe:[], massa:[], recheio:[] };
@@ -1444,7 +1452,7 @@ function renderDetalhe(){
   ordenarPor(lista,'detalhe',COLS_DET);
 
   var o=ord.detalhe;
-  var grupos=[[1,'INFORMAÇÕES DO PRODUTO'],[2,'MASSA'],[3,'RECHEIO'],[4,'TOTAL']];
+  var grupos=[[1,'INFORMAÇÕES DO PRODUTO'],[2,'MASSA'],[3,'RECHEIO'],[4,'EMBALAGEM'],[5,'TOTAL']];
   var hg='<tr>'+grupos.map(function(g){
     var n=COLS_DET.filter(function(c){ return c.g===g[0]; }).length;
     return '<th class="grp g'+g[0]+'" colspan="'+n+'">'+g[1]+'</th>';
@@ -1488,7 +1496,6 @@ function renderDetalhe(){
       '<td>'+(x.ativo?'Sim':'<span class="mut">N\u00e3o</span>')+'</td>'+
       '<td class="mono mut">'+esc(x.p.cod||'\u2014')+'</td>'+
       '<td>'+txt(x.marca)+'</td>'+
-      '<td>'+txt(x.embalagem)+'</td>'+
       '<td class="r num">'+gr(x.pesoPct)+'</td>'+
       '<td class="r num">'+un(x.qtdCad, x.qtdCad%1!==0?2:0)+'</td>'+
       '<td class="r num">'+qc+'</td>'+
@@ -1504,8 +1511,15 @@ function renderDetalhe(){
       '<td class="r num">'+mo(x.r2&&x.r2.custoKg>0?x.r2.custoKg:null)+'</td>'+
       '<td class="r num">'+gr(x.r2?x.r2.gramas:null, x.r2)+'</td>'+
       '<td class="r num">'+mo(x.r2?x.r2.custo:null)+'</td>'+
+      '<td class="sep">'+(x.embNome
+        ? esc(x.embNome)+(x.embOrigem==='sem'?' <span class="divg" title="Embalagem sem valor cadastrado">\u26a0</span>':'')+(x.embFonte==='custos'?' <span class="un">sobreposta</span>':'')
+        : (x.embOrigem==='manual'?'<span class="un">valor manual</span>':vazio))+'</td>'+
+      '<td class="r num">'+mo(x.embPu>0?x.embPu:null)+'</td>'+
+      '<td class="r num">'+(x.embCod?fmtN(x.embQtd,x.embQtd%1!==0?2:0)+' <span class="un">un</span>':vazio)+'</td>'+
+      '<td class="r num">'+mo(x.embPorUn>0?x.embPorUn:null,4)+'</td>'+
       '<td class="r num sep">'+mo(x.totRech>0?x.totRech:null)+'</td>'+
-      '<td class="r num" style="font-weight:600">'+mo(x.custoUn>0?x.custoUn:null)+'</td>'+
+      '<td class="r num">'+mo(x.custoUn>0?x.custoUn:null)+'</td>'+
+      '<td class="r num" style="font-weight:600">'+mo(x.custoComEmb>0?x.custoComEmb:null)+'</td>'+
       '<td class="r num">'+mo(x.custoPct,2)+'</td>'+
       '<td class="r num" style="font-weight:600">'+mo(x.custoKg,2)+'</td></tr>';
   });
