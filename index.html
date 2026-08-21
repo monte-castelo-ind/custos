@@ -612,17 +612,38 @@ function custoProduto(p, sim){
   function addComp(nome, tipoRec, gramas, rotulo){
     if(!nome) return;                       // nada selecionado: nao ha componente
     var g=num(gramas);
-    var rec=achaReceita(nome, tipoRec);
-    if(!rec){ faltantes.push('receita "'+nome+'" não encontrada'); fichaIncompleta=true; return; }
-    var cr=custoReceita(rec, sim);
-    if(!cr || cr.custoKg<=0){ faltantes.push('receita "'+nome+'" sem custo'); fichaIncompleta=true; }
-    if(cr && cr.faltantes.length) cr.faltantes.forEach(function(f){ faltantes.push('MP sem preço: '+f); });
+    var custoKg=0, rec=null, tipo='receita';
+
+    // 1) receita (massasList / recheiosList)
+    rec=achaReceita(nome, tipoRec);
+    if(rec){
+      var cr=custoReceita(rec, sim);
+      custoKg=cr?cr.custoKg:0;
+      if(!cr || cr.custoKg<=0){ faltantes.push('receita "'+nome+'" sem custo'); fichaIncompleta=true; }
+      if(cr && cr.faltantes.length) cr.faltantes.forEach(function(f){ faltantes.push('MP sem preço: '+f); });
+    } else {
+      // 2) matéria-prima usada direto como recheio (ex.: requeijão puro).
+      //    O dropdown do Produlog oferece MPs além das receitas.
+      var mp=null;
+      for(var i=0;i<mps.length;i++){ if(norm(mps[i].nome)===norm(nome)){ mp=mps[i]; break; } }
+      if(mp){
+        tipo='mp';
+        custoKg=precoMP(mp.codigo, sim);
+        if(custoKg<=0){ faltantes.push('matéria-prima "'+nome+'" sem preço'); fichaIncompleta=true; }
+      } else {
+        // 3) nem receita nem MP: registra assim mesmo, para não sumir da tela
+        tipo='?';
+        faltantes.push('"'+nome+'" não encontrado nem como receita nem como matéria-prima');
+        fichaIncompleta=true;
+      }
+    }
+
     // gramatura em branco no Produlog: registra o componente, sinaliza e nao soma custo
     var semGr=(g<=0);
     if(semGr){ faltantes.push(rotulo+' "'+nome+'" sem gramatura no Produlog'); fichaIncompleta=true; }
-    var c=semGr?0:(g/1000*(cr?cr.custoKg:0));
+    var c=semGr?0:(g/1000*custoKg);
     custoMP+=c;
-    comps.push({ rotulo:rotulo, nome:nome, gramas:g, custoKg:(cr?cr.custoKg:0), custo:c, rec:rec, semGr:semGr });
+    comps.push({ rotulo:rotulo, nome:nome, gramas:g, custoKg:custoKg, custo:c, rec:rec, semGr:semGr, tipo:tipo });
   }
   addComp(p.tipoMassa,'massa',p.grMassa,'Massa');
   addComp(p.tipoRecheio,'recheio',p.grRecheio,'Recheio 1');
@@ -960,7 +981,10 @@ function renderProdutos(){
   if(!todos.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhum produto. Confirme se o Produlog tem produtos cadastrados em <span class="mono">produtosConfeitaria</span>.</td></tr>';
   todos.forEach(function(c){
     var ficha=c.comps.map(function(x){
-      return esc(x.nome)+(x.semGr
+      var tag='';
+      if(x.tipo==='mp') tag=' <span class="pill p-mut" title="Matéria-prima usada direto como recheio, sem receita própria">MP</span>';
+      else if(x.tipo==='?') tag=' <span class="pill p-bad" title="Não existe receita nem matéria-prima com este nome">não encontrado</span>';
+      return esc(x.nome)+tag+(x.semGr
         ? ' <span class="pill p-warn" title="Gramatura não preenchida no Produlog — este componente não entra no custo">sem gramatura</span>'
         : ' <span class="mono" style="color:var(--muted)">'+fmtN(x.gramas,1)+'g</span>');
     }).join(' + ')||'<span class="pill p-warn">sem ficha</span>';
@@ -1163,6 +1187,14 @@ function renderDetalhe(){
     }
     function un(v,dec){ return (v!=null&&isFinite(v)&&v>0)?fmtN(v,dec==null?0:dec)+' <span class="un">un</span>':vazio; }
     function txt(s){ return s?esc(s):vazio; }
+    // nome do componente + origem (receita, MP pura, ou nao encontrado)
+    function comp(k){
+      if(!k) return vazio;
+      var t='';
+      if(k.tipo==='mp') t=' <span class="un" title="Matéria-prima usada direto como recheio">MP</span>';
+      else if(k.tipo==='?') t=' <span class="divg" title="Não existe receita nem matéria-prima com este nome">\u26a0</span>';
+      return esc(k.nome)+t;
+    }
     var qc=vazio;
     if(x.qtdCalc!=null){
       var d=(x.diverg!=null&&x.diverg>2);
@@ -1178,15 +1210,15 @@ function renderDetalhe(){
       '<td class="r num">'+gr(x.pesoPct)+'</td>'+
       '<td class="r num">'+un(x.qtdCad, x.qtdCad%1!==0?2:0)+'</td>'+
       '<td class="r num">'+qc+'</td>'+
-      '<td class="sep">'+txt(x.m?x.m.nome:'')+'</td>'+
+      '<td class="sep">'+comp(x.m)+'</td>'+
       '<td class="r num">'+mo(x.m&&x.m.custoKg>0?x.m.custoKg:null)+'</td>'+
       '<td class="r num">'+gr(x.m?x.m.gramas:null, x.m)+'</td>'+
       '<td class="r num">'+mo(x.m?x.m.custo:null)+'</td>'+
-      '<td class="sep">'+txt(x.r1?x.r1.nome:'')+'</td>'+
+      '<td class="sep">'+comp(x.r1)+'</td>'+
       '<td class="r num">'+mo(x.r1&&x.r1.custoKg>0?x.r1.custoKg:null)+'</td>'+
       '<td class="r num">'+gr(x.r1?x.r1.gramas:null, x.r1)+'</td>'+
       '<td class="r num">'+mo(x.r1?x.r1.custo:null)+'</td>'+
-      '<td>'+txt(x.r2?x.r2.nome:'')+'</td>'+
+      '<td>'+comp(x.r2)+'</td>'+
       '<td class="r num">'+mo(x.r2&&x.r2.custoKg>0?x.r2.custoKg:null)+'</td>'+
       '<td class="r num">'+gr(x.r2?x.r2.gramas:null, x.r2)+'</td>'+
       '<td class="r num">'+mo(x.r2?x.r2.custo:null)+'</td>'+
