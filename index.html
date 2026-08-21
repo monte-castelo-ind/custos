@@ -686,11 +686,24 @@ function embPorCodigo(codigo){
 // quantos produtos usam cada embalagem
 function embUsadas(){
   var u={};
-  Object.keys(cfgProduto).forEach(function(k){
-    var c=cfgProduto[k].embalagemCod;
+  produtos.forEach(function(p){
+    var k=chaveProduto(p);
+    var ex=cfgProduto[k]||{};
+    if(num(ex.embalagemPct)>0) return;              // valor manual: não usa embalagem cadastrada
+    var c=ex.embalagemCod||p.embalagemCod||'';
     if(c) u[String(c)]=(u[String(c)]||0)+1;
   });
   return u;
+}
+function produtosDaEmb(codigo){
+  var out=[];
+  produtos.forEach(function(p){
+    var ex=cfgProduto[chaveProduto(p)]||{};
+    if(num(ex.embalagemPct)>0) return;
+    var c=ex.embalagemCod||p.embalagemCod||'';
+    if(String(c)===String(codigo)) out.push(p.nome||chaveProduto(p));
+  });
+  return out;
 }
 
 /* ============ CUSTO DE RECEITA ============ */
@@ -791,12 +804,17 @@ function custoProduto(p, sim){
   var custoMO=pesoUnKg*moKg*fatorMO;
   var custoFixo=pesoUnKg*fixoKg;
 
-  // Embalagem. Prioridade: valor manual em R$/pacote > embalagem cadastrada × quantidade.
+  // Embalagem. Prioridade:
+  //   1) valor manual em R$/pacote (Custos)
+  //   2) embalagem escolhida aqui no Custos (override)
+  //   3) embalagem cadastrada no produto, no Produlog  <- caminho normal
   var embPct=num(extra.embalagemPct);
-  var embCod=extra.embalagemCod||'';
-  var embQtd=num(extra.embalagemQtd)>0?num(extra.embalagemQtd):1;
+  var embCod=extra.embalagemCod||p.embalagemCod||'';
+  var embQtd=num(extra.embalagemCod?extra.embalagemQtd:p.embalagemQtd);
+  if(!(embQtd>0)) embQtd=1;
+  var embFonte=extra.embalagemCod?'custos':'produlog';
   var embNome='', embOrigem='';
-  if(embPct>0){ embOrigem='manual'; }
+  if(embPct>0){ embOrigem='manual'; embFonte='manual'; }
   else if(embCod){
     var eo=embPorCodigo(embCod);
     embNome=eo?(eo.nome||embCod):('['+embCod+']');
@@ -832,7 +850,7 @@ function custoProduto(p, sim){
     p:p, extra:extra, comps:comps, faltantes:faltantes, fichaIncompleta:fichaIncompleta,
     custoMP:custoMP, perda:perda, custoMO:custoMO, custoFixo:custoFixo, custoEmb:custoEmb,
     custoUn:custoUn, custoKg:pesoUnKg>0?custoUn/pesoUnKg:null, custoPct:qtdPct>0?custoUn*qtdPct:null,
-    embCod:embCod, embQtd:embQtd, embNome:embNome, embOrigem:embOrigem, embPct:embPct,
+    embCod:embCod, embQtd:embQtd, embNome:embNome, embOrigem:embOrigem, embPct:embPct, embFonte:embFonte,
     pesoUnG:pesoUnG, pesoUnKg:pesoUnKg, qtdPct:qtdPct,
     precoVendaUn:pvUn, precoVendaBruto:pv, baseVenda:base,
     despVar:despVar, lucro:lucro, margemPct:margemPct, mcR:mcR, mcPct:mcPct, markup:markup,
@@ -1591,10 +1609,7 @@ window.abrirEmb=function(codigo){
   var pb=precoBaseEmb(codigo);
   var usadas=embUsadas();
   var n=usadas[String(codigo)]||0;
-  var quais=[];
-  Object.keys(cfgProduto).forEach(function(k){
-    if(String(cfgProduto[k].embalagemCod||'')===String(codigo)) quais.push(cfgProduto[k].nome||k);
-  });
+  var quais=produtosDaEmb(codigo);
   modal({
     titulo:esc(e.nome||codigo),
     sub:'Código '+esc(codigo)+' · '+esc(e.tipo||'OUTRO')+' · '+esc(e.unidade||'UN')+' · vigente '+(pb.preco>0?fmtR$(pb.preco,3):'sem valor'),
@@ -1868,7 +1883,9 @@ window.abrirProduto=function(chave){
       '<div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.5px;margin-top:19px">COMPOSIÇÃO DO CUSTO POR UNIDADE</div>'+
       '<div class="wf">'+
         linha('Matéria-prima'+(num(cfg.perdaPct)>0?' (inclui '+fmtPct(cfg.perdaPct)+' de perda)':''), c.custoMP, 'var(--primary)', refPct)+
-        linha('Embalagem'+(c.embNome?' · '+c.embNome+(c.embQtd!==1?' ×'+fmtN(c.embQtd,2):''):(c.embOrigem==='manual'?' (valor manual)':'')), c.custoEmb, 'var(--blue)', refPct)+
+        linha('Embalagem'+(c.embNome
+            ? ' · '+c.embNome+(c.embQtd!==1?' ×'+fmtN(c.embQtd,2):'')+(c.embFonte==='custos'?' (sobreposta)':'')
+            : (c.embOrigem==='manual'?' (valor manual)':'')), c.custoEmb, 'var(--blue)', refPct)+
         linha('Mão de obra', c.custoMO, 'var(--amber)', refPct)+
         linha('Custos fixos', c.custoFixo, 'var(--purple)', refPct)+
         '<div class="wfrow tot"><div>Custo total / unidade</div><div class="r num">'+fmtR$(c.custoUn,4)+'</div><div></div></div>'+
@@ -1894,15 +1911,20 @@ window.abrirProduto=function(chave){
         '<div><label>Base do preço</label><select id="pd-base" '+(podeEditar?'':'disabled')+'>'+
           ['pct|por pacote','un|por unidade','kg|por kg'].map(function(o){ var v=o.split('|'); return '<option value="'+v[0]+'"'+(c.baseVenda===v[0]?' selected':'')+'>'+v[1]+'</option>'; }).join('')+
         '</select></div>'+
-        '<div><label>Embalagem cadastrada</label><select id="pd-embcod" '+(podeEditar?'':'disabled')+'>'+
-          '<option value="">— nenhuma —</option>'+
+        '<div><label>Embalagem</label><select id="pd-embcod" '+(podeEditar?'':'disabled')+'>'+
+          '<option value="">'+(p.embalagemCod
+            ? '— usar a do Produlog: '+esc((embPorCodigo(p.embalagemCod)||{}).nome||p.embalagemCod)+' —'
+            : '— nenhuma —')+'</option>'+
           embalagens.slice().sort(function(a,b){ return String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'); }).map(function(eo){
             var pu=precoBaseEmb(eo.codigo).preco;
             return '<option value="'+esc(eo.codigo)+'"'+(String(extra.embalagemCod||'')===String(eo.codigo)?' selected':'')+'>'+
               esc(eo.nome)+' — '+(pu>0?fmtR$(pu,3):'sem valor')+'</option>';
           }).join('')+'</select>'+
-          '<div class="fhint">Cadastro no Produlog. O custo por pacote sai de valor × quantidade.</div></div>'+
-        '<div><label>Qtd. de embalagem por pacote</label><input type="number" id="pd-embqtd" step="0.01" value="'+(num(extra.embalagemQtd)>0?num(extra.embalagemQtd):1)+'" '+(podeEditar?'':'disabled')+' /></div>'+
+          '<div class="fhint">'+(p.embalagemCod
+            ? 'Já vem do Produlog. Escolha outra aqui só para sobrepor.'
+            : 'O ideal é cadastrar no Produlog, na tela do produto. Aqui serve como exceção.')+'</div></div>'+
+        '<div><label>Qtd. por pacote</label><input type="number" id="pd-embqtd" step="0.01" value="'+(num(extra.embalagemQtd)>0?num(extra.embalagemQtd):(num(p.embalagemQtd)>0?num(p.embalagemQtd):1))+'" '+(podeEditar?'':'disabled')+' />'+
+          '<div class="fhint">Só vale se você escolher uma embalagem acima.</div></div>'+
         '<div><label>Ou valor manual · R$/pacote</label><input type="number" id="pd-emb" step="0.001" value="'+(extra.embalagemPct||'')+'" '+(podeEditar?'':'disabled')+' />'+
           '<div class="fhint">Se preenchido, sobrepõe a embalagem cadastrada.</div></div>'+
         '<div><label>Fator de mão de obra</label><input type="number" id="pd-mo" step="0.05" value="'+(extra.fatorMO||1)+'" '+(podeEditar?'':'disabled')+' />'+
