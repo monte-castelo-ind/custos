@@ -455,7 +455,8 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
       <div class="tools">
         <input type="text" id="sim-busca" placeholder="Buscar produto..." oninput="render()" />
         <select id="sim-ord" onchange="render()">
-          <option value="impacto">Ordenar por impacto</option>
+          <option value="reais">Ordenar por impacto R$/mês</option>
+          <option value="impacto">Ordenar por impacto %</option>
           <option value="margem">Ordenar por margem simulada</option>
           <option value="nome">Ordenar por nome</option>
         </select>
@@ -543,7 +544,7 @@ const authProd = getAuth(appProd);
 /* ============ ESTADO ============ */
 var pagina='painel', sessaoEmail='', currentRole=null, currentAtivo=false, podeEditar=false;
 var mps=[], comprasMP=[], massas=[], recheios=[], produtos=[], embalagens=[];
-var cfgMP={}, cfgProduto={}, cfgEmb={}, cenarios=[];
+var cfgMP={}, cfgProduto={}, cfgEmb={}, cenarios=[], comercial=[];
 var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20 };
 var simAtual={ id:null, nome:'Cenário sem título', ajustes:{}, globalPct:0, vendaPct:0 };
 var subs={};
@@ -562,6 +563,8 @@ const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos
 /* ============ UTIL ============ */
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function norm(s){ return String(s==null?'':s).replace(/\s+/g,' ').trim().toUpperCase(); }
+// o robô grava nomeNorm sem acento; aqui precisa do mesmo critério para casar
+function normSemAcento(s){ return norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 function num(v){ var n=parseFloat(v); return isFinite(n)?n:0; }
 function fmtR$(v,d){ if(v==null||!isFinite(v)) return '—'; var dd=(d==null?2:d); return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:dd,maximumFractionDigits:dd}); }
 function fmtR$k(v){ if(v==null||!isFinite(v)) return '—'; return 'R$ '+Math.round(v).toLocaleString('pt-BR'); }
@@ -655,6 +658,40 @@ function precoMP(codigo, sim){
   var g=num(sim.globalPct);
   if(g) return base.preco*(1+g/100);
   return base.preco;
+}
+
+/* ============ VENDA REAL (ERP) ============ */
+// O robô grava em comercialProduto: preço praticado e volume por produto.
+// Casamento com o Produlog: por código primeiro, por nome normalizado depois.
+var comIdxCod={}, comIdxNome={};
+function indexarComercial(){
+  comIdxCod={}; comIdxNome={};
+  comercial.forEach(function(c){
+    if(c.codigo) comIdxCod[String(c.codigo).trim()]=c;
+    if(c.nomeNorm) comIdxNome[c.nomeNorm]=c;
+    else if(c.nome) comIdxNome[normSemAcento(c.nome)]=c;
+  });
+}
+function vendaERP(p){
+  if(!comercial.length) return null;
+  var cod=(p.cod!=null?String(p.cod).trim():'');
+  if(cod && comIdxCod[cod]) return comIdxCod[cod];
+  // o CSV do ERP não traz código de produto, então na prática o casamento é por nome
+  if(p.nome && comIdxNome[normSemAcento(p.nome)]) return comIdxNome[normSemAcento(p.nome)];
+  return null;
+}
+// quantos produtos do Produlog não acharam par no ERP
+function produtosSemERP(){
+  if(!comercial.length) return [];
+  return produtos.filter(function(p){ return !vendaERP(p); });
+}
+// volume mensal médio: 3 meses quando houver, senão 12
+function volumeMes(c){
+  if(!c) return 0;
+  var u3=c.ultimos3||{}, u12=c.ultimos12||{};
+  if(num(u3.qtd)>0) return num(u3.qtd)/3;
+  if(num(u12.qtd)>0) return num(u12.qtd)/12;
+  return 0;
 }
 
 /* ============ PREÇO DE EMBALAGEM ============ */
@@ -827,9 +864,15 @@ function custoProduto(p, sim){
 
   var custoUn=custoMP+custoMO+custoFixo+custoEmb;
 
-  // preço de venda
+  // Preço de venda. Manual (cadastrado aqui) vence; senão usa o praticado no ERP.
   var base=extra.baseVenda||'pct';
   var pv=num(extra.precoVenda);
+  var pvFonte=pv>0?'manual':'';
+  var com=vendaERP(p);
+  if(pv<=0 && com){
+    var pe=num(com.precoMedio3m)>0?num(com.precoMedio3m):num(com.precoMedio);
+    if(pe>0){ pv=pe; pvFonte='erp'; base='pct'; }   // ERP fatura pela unidade de venda
+  }
   if(sim && num(sim.vendaPct)) pv=pv*(1+num(sim.vendaPct)/100);
   var pvUn=null;
   if(pv>0){
@@ -852,7 +895,12 @@ function custoProduto(p, sim){
     custoUn:custoUn, custoKg:pesoUnKg>0?custoUn/pesoUnKg:null, custoPct:qtdPct>0?custoUn*qtdPct:null,
     embCod:embCod, embQtd:embQtd, embNome:embNome, embOrigem:embOrigem, embPct:embPct, embFonte:embFonte,
     pesoUnG:pesoUnG, pesoUnKg:pesoUnKg, qtdPct:qtdPct,
-    precoVendaUn:pvUn, precoVendaBruto:pv, baseVenda:base,
+    precoVendaUn:pvUn, precoVendaBruto:pv, baseVenda:base, pvFonte:pvFonte,
+    com:com, volMes:volumeMes(com),
+    get lucroMes(){ if(!(this.volMes>0)||this.lucro==null) return null;
+      return this.lucro*this.volMes*(this.qtdPct>0?this.qtdPct:1); },
+    get receitaMes(){ if(!(this.volMes>0)||this.precoVendaUn==null) return null;
+      return this.precoVendaUn*this.volMes*(this.qtdPct>0?this.qtdPct:1); },
     despVar:despVar, lucro:lucro, margemPct:margemPct, mcR:mcR, mcPct:mcPct, markup:markup,
     temPreco:pvUn!=null&&pvUn>0
   };
@@ -894,10 +942,25 @@ function diagnosticos(){
     acao:'Ver embalagens', pagina:'emb'
   });
 
+  if(!comercial.length){
+    out.push({
+      sev:'info', titulo:'Sem dados de venda do ERP',
+      sub:'Sem preço praticado e sem volume, a margem não é ponderada e o impacto em R$/mês não aparece.',
+      acao:'Ver produtos', pagina:'produtos'
+    });
+  } else {
+    var semPar=produtosSemERP().length;
+    if(semPar>0) out.push({
+      sev:'warn', titulo:semPar+' produto(s) sem par no ERP',
+      sub:'O ERP não traz código de produto, então o casamento é pelo nome. Nome diferente entre Produlog e Protheus deixa o produto sem preço e sem volume.',
+      acao:'Ver produtos', pagina:'produtos'
+    });
+  }
+
   var todos=todosCustos(null);
   var semPreco=0, incompletos=0, negativos=0, abaixo=0;
   todos.forEach(function(c){
-    if(!c.temPreco) semPreco++;
+    if(!c.temPreco) semPreco++;   // já considera o preço do ERP como preenchido
     if(c.fichaIncompleta) incompletos++;
     if(c.temPreco && !c.fichaIncompleta && c.margemPct!=null){
       if(c.margemPct<0) negativos++;
@@ -1006,7 +1069,9 @@ var COLS_PAINEL=[
   { k:'precoVendaUn',l:'Venda/un', r:1, v:function(c){ return c.precoVendaUn; } },
   { k:'mcPct',      l:'Mg contrib.',r:1,v:function(c){ return c.mcPct; } },
   { k:'margemPct',  l:'Mg líq.',   r:1, v:function(c){ return c.margemPct; } },
-  { k:'markup',     l:'Markup',    r:1, v:function(c){ return c.markup; } }
+  { k:'markup',     l:'Markup',    r:1, v:function(c){ return c.markup; } },
+  { k:'volMes',     l:'Vol/mês',   r:1, v:function(c){ return c.volMes>0?c.volMes:null; } },
+  { k:'lucroMes',   l:'Lucro/mês', r:1, v:function(c){ return c.lucroMes; } }
 ];
 var COLS_PRODUTOS=[
   { k:'cod',      l:'Cód',              v:function(c){ return String(c.p.cod||''); } },
@@ -1044,17 +1109,36 @@ function renderPainel(){
   var comPreco=todos.filter(function(c){ return c.temPreco && !c.fichaIncompleta; });
   var semPreco=todos.filter(function(c){ return !c.temPreco; }).length;
   var incompletos=todos.filter(function(c){ return c.fichaIncompleta; }).length;
+  // Margem média. Com volume do ERP, pondera; sem volume, média simples —
+  // e o cartão diz qual das duas está sendo mostrada, porque a diferença é grande.
   var margemMedia=null, abaixo=0, negativos=0;
-  if(comPreco.length){
+  var temVolume=false, lucroMes=0, receitaMes=0, custoMes=0;
+  comPreco.forEach(function(c){
+    if(c.margemPct<0) negativos++; else if(c.margemPct<cfg.margemAlvoPct) abaixo++;
+    if(c.volMes>0 && c.precoVendaUn!=null){
+      temVolume=true;
+      var un=c.volMes*(c.qtdPct>0?c.qtdPct:1);      // volume vem em unidade de venda
+      receitaMes+=c.precoVendaUn*un;
+      lucroMes  +=c.lucro*un;
+      custoMes  +=c.custoUn*un;
+    }
+  });
+  if(temVolume && receitaMes>0){
+    margemMedia=lucroMes/receitaMes*100;
+  } else if(comPreco.length){
     var somaMg=0;
-    comPreco.forEach(function(c){ somaMg+=c.margemPct; if(c.margemPct<0) negativos++; else if(c.margemPct<cfg.margemAlvoPct) abaixo++; });
+    comPreco.forEach(function(c){ somaMg+=c.margemPct; });
     margemMedia=somaMg/comPreco.length;
   }
 
-  // (os avisos foram para o indicador ⚠ no topo — ver renderAvisos)
-
   var kpis=[
-    { l:'Margem líquida média', v:margemMedia!=null?fmtPct(margemMedia):'—', h:comPreco.length+' produto(s) com cálculo completo', c:margemMedia!=null?(margemMedia<cfg.margemAlvoPct?'var(--amber)':'var(--green)'):'' },
+    { l:temVolume?'Margem líquida ponderada':'Margem líquida média',
+      v:margemMedia!=null?fmtPct(margemMedia):'—',
+      h:temVolume?'ponderada pelo volume vendido':(comPreco.length+' produto(s) · média simples, sem volume'),
+      c:margemMedia!=null?(margemMedia<cfg.margemAlvoPct?'var(--amber)':'var(--green)'):'' },
+    { l:'Lucro estimado / mês', v:temVolume?fmtR$k(lucroMes):'—',
+      h:temVolume?('sobre '+fmtR$k(receitaMes)+' de receita'):'depende do volume do ERP',
+      c:temVolume?(lucroMes<0?'var(--red)':'var(--green)'):'' },
     { l:'Meta de margem', v:fmtPct(cfg.margemAlvoPct), h:'definida em Configurações' },
     { l:'Abaixo da meta', v:String(abaixo), h:'entre 0% e '+fmtPct(cfg.margemAlvoPct), c:abaixo>0?'var(--amber)':'' },
     { l:'Margem negativa', v:String(negativos), h:'preço não cobre o custo', c:negativos>0?'var(--red)':'' },
@@ -1090,10 +1174,15 @@ function renderPainel(){
       '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
       '<td class="r num">'+(c.custoUn>0?fmtR$(c.custoUn,3):'—')+(c.fichaIncompleta?' <span class="pill p-warn">?</span>':'')+'</td>'+
       '<td class="r num">'+(c.custoKg?fmtR$(c.custoKg):'—')+'</td>'+
-      '<td class="r num">'+(c.temPreco?fmtR$(c.precoVendaUn,3):'<span class="pill p-mut">definir</span>')+'</td>'+
+      '<td class="r num">'+(c.temPreco
+        ? fmtR$(c.precoVendaUn,3)+(c.pvFonte==='erp'?' <span class="pill p-ok" title="Preço praticado, vindo do ERP">ERP</span>':'')
+        : '<span class="pill p-mut">definir</span>')+'</td>'+
       '<td class="r num">'+(c.mcPct!=null?fmtPct(c.mcPct):'—')+'</td>'+
       '<td class="r"><span class="pill '+corMargem(c.margemPct)+'">'+(c.margemPct!=null?fmtPct(c.margemPct):'—')+'</span></td>'+
-      '<td class="r num">'+(c.markup?fmtN(c.markup,2)+'\u00d7':'—')+'</td></tr>';
+      '<td class="r num">'+(c.markup?fmtN(c.markup,2)+'\u00d7':'—')+'</td>'+
+      '<td class="r num">'+(c.volMes>0?fmtN(c.volMes,0):'<span style="color:var(--muted)">—</span>')+'</td>'+
+      '<td class="r num" style="'+(c.lucroMes!=null&&c.lucroMes<0?'color:var(--red);font-weight:600':'')+'">'+
+        (c.lucroMes!=null?fmtR$k(c.lucroMes):'<span style="color:var(--muted)">—</span>')+'</td></tr>';
   });
   document.getElementById('tbl-prod').innerHTML=html+'</tbody>';
 }
@@ -1690,12 +1779,24 @@ function renderSim(){
   var cv=comp.filter(function(x){ return x.dCustoPct!=null; });
   if(cv.length){ var s2=0; cv.forEach(function(x){ s2+=x.dCustoPct; }); dCustoMed=s2/cv.length; }
 
+  // Impacto em R$/mês: é o número que decide se o reajuste é grave ou não.
+  var temVol=false, impactoMes=0, lucroReal=0, lucroSim=0;
+  comp.forEach(function(x){
+    var un=x.s.volMes*(x.s.qtdPct>0?x.s.qtdPct:1);
+    if(!(x.s.volMes>0)) return;
+    temVol=true;
+    if(x.r && x.r.custoUn>0) impactoMes+=(x.s.custoUn-x.r.custoUn)*un;
+    if(x.r && x.r.lucro!=null && x.s.lucro!=null){ lucroReal+=x.r.lucro*un; lucroSim+=x.s.lucro*un; }
+  });
+
   function dlt(v,inv){ if(v==null) return '—'; var cls=(inv?(v>0?'delta-dn':'delta-up'):(v>0?'delta-up':'delta-dn')); if(Math.abs(v)<0.005) cls=''; return '<span class="'+cls+'">'+(v>0?'+':'')+fmtPct(v)+'</span>'; }
 
   document.getElementById('sim-kpis').innerHTML=[
     '<div class="card"><div class="klabel">Margem média · real</div><div class="kval">'+(mgR!=null?fmtPct(mgR):'—')+'</div><div class="khint">'+validos.length+' produto(s)</div></div>',
     '<div class="card"><div class="klabel">Margem média · simulada</div><div class="kval" style="color:'+(mgS!=null&&mgR!=null?(mgS<mgR?'var(--red)':'var(--green)'):'')+'">'+(mgS!=null?fmtPct(mgS):'—')+'</div><div class="khint">'+((mgS!=null&&mgR!=null)?dlt(mgS-mgR,true)+' pp vs real':'—')+'</div></div>',
     '<div class="card"><div class="klabel">Variação média do custo</div><div class="kval" style="color:'+(dCustoMed?(dCustoMed>0?'var(--red)':'var(--green)'):'')+'">'+(dCustoMed!=null?((dCustoMed>0?'+':'')+fmtPct(dCustoMed)):'—')+'</div><div class="khint">média simples entre produtos</div></div>',
+    '<div class="card" style="'+(temVol?'border-color:var(--amber)':'')+'"><div class="klabel">Impacto no custo · R$/mês</div><div class="kval" style="color:'+(temVol?(impactoMes>0?'var(--red)':'var(--green)'):'')+'">'+(temVol?((impactoMes>0?'+':'')+fmtR$k(impactoMes)):'—')+'</div><div class="khint">'+(temVol?'no volume dos últimos 3 meses':'depende do volume do ERP')+'</div></div>',
+    '<div class="card"><div class="klabel">Lucro estimado / mês</div><div class="kval" style="color:'+(temVol?(lucroSim<lucroReal?'var(--red)':'var(--green)'):'')+'">'+(temVol?fmtR$k(lucroSim):'—')+'</div><div class="khint">'+(temVol?('era '+fmtR$k(lucroReal)):'—')+'</div></div>',
     '<div class="card"><div class="klabel">Abaixo da meta</div><div class="kval">'+abaixoR+' → <span style="color:'+(abaixoS>abaixoR?'var(--red)':'var(--green)')+'">'+abaixoS+'</span></div><div class="khint">real → simulado</div></div>',
     '<div class="card"><div class="klabel">Margem negativa (sim.)</div><div class="kval" style="color:'+(negS>0?'var(--red)':'')+'">'+negS+'</div><div class="khint">preço não cobre custo</div></div>'
   ].join('');
@@ -1721,18 +1822,29 @@ function renderSim(){
   var q=norm(document.getElementById('sim-busca').value);
   var ord=document.getElementById('sim-ord').value;
   var lista=comp.filter(function(x){ return !q || norm(x.s.p.nome).indexOf(q)>=0; });
-  if(ord==='impacto') lista.sort(function(a,b){ return (b.dCustoPct==null?-1e9:b.dCustoPct)-(a.dCustoPct==null?-1e9:a.dCustoPct); });
+  if(ord==='reais') lista.sort(function(a,b){
+    function imp(x){ if(!(x.s.volMes>0)||!x.r||!(x.r.custoUn>0)) return -1e12;
+      return (x.s.custoUn-x.r.custoUn)*x.s.volMes*(x.s.qtdPct>0?x.s.qtdPct:1); }
+    return imp(b)-imp(a);
+  });
+  else if(ord==='impacto') lista.sort(function(a,b){ return (b.dCustoPct==null?-1e9:b.dCustoPct)-(a.dCustoPct==null?-1e9:a.dCustoPct); });
   else if(ord==='margem') lista.sort(function(a,b){ return (a.s.margemPct==null?1e9:a.s.margemPct)-(b.s.margemPct==null?1e9:b.s.margemPct); });
   else lista.sort(function(a,b){ return norm(a.s.p.nome)<norm(b.s.p.nome)?-1:1; });
 
-  var html='<thead><tr><th>Produto</th><th class="r">Custo real</th><th class="r">Custo sim.</th><th class="r">Δ custo</th><th class="r">Margem real</th><th class="r">Margem sim.</th><th class="r">Δ pp</th></tr></thead><tbody>';
-  if(!lista.length) html+='<tr><td colspan="7" class="empty">Nenhum produto.</td></tr>';
+  var html='<thead><tr><th>Produto</th><th class="r">Custo real</th><th class="r">Custo sim.</th><th class="r">Δ custo</th><th class="r">Δ R$/mês</th><th class="r">Margem real</th><th class="r">Margem sim.</th><th class="r">Δ pp</th></tr></thead><tbody>';
+  if(!lista.length) html+='<tr><td colspan="8" class="empty">Nenhum produto.</td></tr>';
   lista.slice(0,200).forEach(function(x){
     html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(x.s.p))+'\')">'+
       '<td><div class="nm">'+esc(x.s.p.nome||'—')+'</div></td>'+
       '<td class="r num">'+(x.r&&x.r.custoUn>0?fmtR$(x.r.custoUn,3):'—')+'</td>'+
       '<td class="r num">'+(x.s.custoUn>0?fmtR$(x.s.custoUn,3):'—')+'</td>'+
       '<td class="r num">'+dlt(x.dCustoPct)+'</td>'+
+      '<td class="r num">'+(function(){
+        if(!(x.s.volMes>0)||!x.r||!(x.r.custoUn>0)) return '<span style="color:var(--muted)">—</span>';
+        var v=(x.s.custoUn-x.r.custoUn)*x.s.volMes*(x.s.qtdPct>0?x.s.qtdPct:1);
+        if(Math.abs(v)<0.5) return '<span style="color:var(--muted)">—</span>';
+        return '<span class="'+(v>0?'delta-up':'delta-dn')+'">'+(v>0?'+':'')+fmtR$k(v)+'</span>';
+      })()+'</td>'+
       '<td class="r num">'+(x.r&&x.r.margemPct!=null?fmtPct(x.r.margemPct):'—')+'</td>'+
       '<td class="r"><span class="pill '+corMargem(x.s.margemPct)+'">'+(x.s.margemPct!=null?fmtPct(x.s.margemPct):'—')+'</span></td>'+
       '<td class="r num">'+dlt(x.dMargem,true)+'</td></tr>';
@@ -2096,6 +2208,11 @@ function liberar(d){
   // Se um dia o Produlog ganhar Auth, o callback abaixo cobre o caso e a
   // função é idempotente (guardada por if(subs.mps) return).
   ligarProdulog();
+
+  if(!subs.com) subs.com=onSnapshot(collection(dbC,'comercialProduto'), function(s){
+    comercial=s.docs.map(function(x){ return Object.assign({ id:x.id }, x.data()); });
+    indexarComercial(); render();
+  }, function(e){ console.warn('comercialProduto:',e.code||e.message); });
 
   if(!subs.cen) subs.cen=onSnapshot(collection(dbC,'custosCenarios'), function(s){
     cenarios=s.docs.map(function(x){ return Object.assign({ id:x.id }, x.data()); })
