@@ -548,6 +548,7 @@ var cfgMP={}, cfgProduto={}, cfgEmb={}, cenarios=[], comercial=[];
 var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20 };
 var simAtual={ id:null, nome:'Cenário sem título', ajustes:{}, globalPct:0, vendaPct:0 };
 var subs={};
+var errosLeitura={};   // colecao -> code, para o aviso dizer o motivo certo
 var ord={
   painel:   { col:'margemPct', dir:1  },
   produtos: { col:'nome',      dir:1  },
@@ -942,10 +943,19 @@ function diagnosticos(){
     acao:'Ver embalagens', pagina:'emb'
   });
 
-  if(!comercial.length){
+  if(errosLeitura['comercialProduto']){
+    var cd=errosLeitura['comercialProduto'];
+    out.push({
+      sev:'warn', titulo:'Não consegui ler os dados de venda',
+      sub: cd==='permission-denied'
+        ? 'O Firestore recusou a leitura de comercialProduto. Falta a regra desta coleção no projeto Comodato. Depois de publicar, recarregue a página.'
+        : ('Erro ao ler comercialProduto: '+cd),
+      acao:'Ver produtos', pagina:'produtos'
+    });
+  } else if(!comercial.length){
     out.push({
       sev:'info', titulo:'Sem dados de venda do ERP',
-      sub:'Sem preço praticado e sem volume, a margem não é ponderada e o impacto em R$/mês não aparece.',
+      sub:'A coleção comercialProduto está vazia — o robô ainda não gravou. Confira no log do Actions a linha "produtos: N gravados".',
       acao:'Ver produtos', pagina:'produtos'
     });
   } else {
@@ -2174,6 +2184,27 @@ function iniciarSessao(user){
     liberar(d);
   }, function(err){ console.error('usuarios:',err); negar('Não foi possível carregar suas permissões: '+(err.code||err.message)); });
 }
+// onSnapshot que falha por permissão é encerrado pelo Firebase e não volta sozinho.
+// Aqui a inscrição é limpa e refeita, e o erro fica visível no painel de avisos.
+function ouvir(chave, ref, onDados){
+  if(subs[chave]) return;
+  subs[chave]=onSnapshot(ref, function(s){
+    if(errosLeitura[chave]){ delete errosLeitura[chave]; }
+    onDados(s);
+  }, function(e){
+    var code=(e&&e.code)||String(e&&e.message||'erro');
+    console.warn(chave+':',code);
+    errosLeitura[chave]=code;
+    try{ if(subs[chave]) subs[chave](); }catch(err){}
+    delete subs[chave];                       // permite nova tentativa
+    render();
+    if(code==='permission-denied'){
+      // regra recém-publicada leva alguns segundos para propagar
+      setTimeout(function(){ if(!subs[chave]) ouvir(chave, ref, onDados); }, 8000);
+    }
+  });
+}
+
 function liberar(d){
   var neg=document.getElementById('s-negado'); neg.style.display='none';
   document.getElementById('app').style.display='block';
@@ -2185,22 +2216,22 @@ function liberar(d){
   if(pagina==='detalhe' && currentRole!=='admin') nav('produtos');
 
   // COMODATO (leitura + escrita)
-  if(!subs.cfg) subs.cfg=onSnapshot(doc(dbC,'custosConfig','app'), function(s){
+  ouvir('custosConfig', doc(dbC,'custosConfig','app'), function(s){
     if(s.exists()){ var dd=s.data(); Object.keys(cfg).forEach(function(k){ if(dd[k]!=null) cfg[k]=dd[k]; }); }
     render();
-  }, function(e){ console.warn('custosConfig:',e.code||e.message); });
+  });
 
-  if(!subs.mpOv) subs.mpOv=onSnapshot(collection(dbC,'custosMP'), function(s){
+  ouvir('custosMP', collection(dbC,'custosMP'), function(s){
     cfgMP={}; s.docs.forEach(function(x){ cfgMP[x.id]=x.data(); }); render();
-  }, function(e){ console.warn('custosMP:',e.code||e.message); });
+  });
 
-  if(!subs.embOv) subs.embOv=onSnapshot(collection(dbC,'custosEmb'), function(s){
+  ouvir('custosEmb', collection(dbC,'custosEmb'), function(s){
     cfgEmb={}; s.docs.forEach(function(x){ cfgEmb[x.id]=x.data(); }); render();
-  }, function(e){ console.warn('custosEmb:',e.code||e.message); });
+  });
 
-  if(!subs.prodEx) subs.prodEx=onSnapshot(collection(dbC,'custosProduto'), function(s){
+  ouvir('custosProduto', collection(dbC,'custosProduto'), function(s){
     cfgProduto={}; s.docs.forEach(function(x){ cfgProduto[x.id]=x.data(); }); render();
-  }, function(e){ console.warn('custosProduto:',e.code||e.message); });
+  });
 
   // PRODULOG: as regras do projeto montecastelo-a0764 hoje permitem leitura
   // sem autenticação (o Produlog não usa Firebase Auth). Por isso ligamos os
@@ -2209,47 +2240,46 @@ function liberar(d){
   // função é idempotente (guardada por if(subs.mps) return).
   ligarProdulog();
 
-  if(!subs.com) subs.com=onSnapshot(collection(dbC,'comercialProduto'), function(s){
+  ouvir('comercialProduto', collection(dbC,'comercialProduto'), function(s){
     comercial=s.docs.map(function(x){ return Object.assign({ id:x.id }, x.data()); });
     indexarComercial(); render();
-  }, function(e){ console.warn('comercialProduto:',e.code||e.message); });
+  });
 
-  if(!subs.cen) subs.cen=onSnapshot(collection(dbC,'custosCenarios'), function(s){
+  ouvir('custosCenarios', collection(dbC,'custosCenarios'), function(s){
     cenarios=s.docs.map(function(x){ return Object.assign({ id:x.id }, x.data()); })
       .sort(function(a,b){ return String(b.atualizadoEm||'').localeCompare(String(a.atualizadoEm||'')); });
     render();
-  }, function(e){ console.warn('custosCenarios:',e.code||e.message); });
+  });
 
   render();
 }
 function ligarProdulog(){
-  if(subs.mps) return;
-  subs.mps=onSnapshot(collection(dbProd,'materiasPrimas'), function(s){
+  ouvir('materiasPrimas', collection(dbProd,'materiasPrimas'), function(s){
     mps=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); });
     mps.forEach(function(m){ if(m.codigo==null) m.codigo=m.firestoreId; });
     ultimaCarga=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
     render();
-  }, function(e){ console.warn('materiasPrimas:',e.code||e.message); });
+  });
 
-  subs.compras=onSnapshot(collection(dbProd,'comprasMP'), function(s){
+  ouvir('comprasMP', collection(dbProd,'comprasMP'), function(s){
     comprasMP=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
-  }, function(e){ console.warn('comprasMP:',e.code||e.message); });
+  });
 
-  subs.massas=onSnapshot(collection(dbProd,'massasList'), function(s){
+  ouvir('massasList', collection(dbProd,'massasList'), function(s){
     massas=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
-  }, function(e){ console.warn('massasList:',e.code||e.message); });
+  });
 
-  subs.recheios=onSnapshot(collection(dbProd,'recheiosList'), function(s){
+  ouvir('recheiosList', collection(dbProd,'recheiosList'), function(s){
     recheios=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
-  }, function(e){ console.warn('recheiosList:',e.code||e.message); });
+  });
 
-  subs.produtos=onSnapshot(collection(dbProd,'produtosConfeitaria'), function(s){
+  ouvir('produtosConfeitaria', collection(dbProd,'produtosConfeitaria'), function(s){
     produtos=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
-  }, function(e){ console.warn('produtosConfeitaria:',e.code||e.message); });
+  });
 
-  subs.emb=onSnapshot(collection(dbProd,'embalagens'), function(s){
+  ouvir('embalagens', collection(dbProd,'embalagens'), function(s){
     embalagens=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
-  }, function(e){ console.warn('embalagens:',e.code||e.message); });
+  });
 }
 
 
