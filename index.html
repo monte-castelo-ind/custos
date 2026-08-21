@@ -74,7 +74,7 @@ html[data-theme="light"] .side:hover,html[data-theme="light"] .side.pin{box-shad
 /* recolhida mostra só a marca compacta; expandida mostra o logo da Monte Castelo */
 .side-logo .brand-logo-box,.side-logo .brand-cap{display:none}
 .side:hover .side-logo .brand-logo-box,.side.pin .side-logo .brand-logo-box{display:block;height:44px}
-.side:hover .side-logo .brand-cap,.side.pin .side-logo .brand-cap{display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin-top:5px}
+.side:hover .side-logo .brand-cap,.side.pin .side-logo .brand-cap{display:block;text-align:left;font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:10px;padding-left:2px}
 .side:hover .side-logo .logo-mini,.side.pin .side-logo .logo-mini{display:none}
 .side-logo span{color:var(--primary)}
 .navbtn{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;background:none;border:none;color:var(--muted);font-size:13.5px;font-weight:500;text-align:left;width:100%}
@@ -287,6 +287,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
     <button class="navbtn" data-p="produtos" onclick="nav('produtos')"><span class="side-ico">≣</span><span class="lbl">Produtos</span></button>
     <button class="navbtn" data-p="receitas" onclick="nav('receitas')"><span class="side-ico">◈</span><span class="lbl">Receitas</span></button>
     <button class="navbtn" data-p="mp" onclick="nav('mp')"><span class="side-ico">◇</span><span class="lbl">Matérias-primas</span></button>
+    <button class="navbtn" data-p="emb" onclick="nav('emb')"><span class="side-ico">▢</span><span class="lbl">Embalagens</span></button>
     <button class="navbtn admin-only" data-p="detalhe" onclick="nav('detalhe')"><span class="side-ico">☷</span><span class="lbl">Detalhar Custo</span></button>
     <button class="navbtn" data-p="sim" onclick="nav('sim')"><span class="side-ico">⇄</span><span class="lbl">Simulação</span></button>
     <button class="navbtn" data-p="config" onclick="nav('config')"><span class="side-ico">⚙</span><span class="lbl">Configurações</span></button>
@@ -397,6 +398,22 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
       <div style="font-size:11px;color:var(--muted);margin-top:9px;line-height:1.6">
         <strong>Un/Pct calc</strong> = Peso Pct ÷ soma das gramaturas. Quando diverge do cadastro em mais de 2%, aparece em amarelo — sinal de gramatura ou peso de pacote errado no Produlog, o que distorce o custo por kg.
       </div>
+    </div>
+
+    <!-- EMBALAGENS -->
+    <div class="page" id="page-emb">
+      <div class="alert a-info">▢ Cadastro e valores vêm do Produlog em <strong>Cadastros › Cadastro de Embalagens</strong>. Aqui você acompanha o uso nos produtos e pode sobrepor o valor para simular.</div>
+      <div class="tools">
+        <input type="text" id="eb-busca" placeholder="Buscar embalagem..." oninput="render()" />
+        <select id="eb-filtro" onchange="render()">
+          <option value="">Todas</option>
+          <option value="usadas">Só usadas em produtos</option>
+          <option value="sempreco">Sem valor</option>
+          <option value="manual">Com valor manual</option>
+        </select>
+        <select id="eb-tipo" onchange="render()"><option value="">Todos os tipos</option></select>
+      </div>
+      <div class="tw"><div class="tscroll"><table id="tbl-emb"></table></div></div>
     </div>
 
     <!-- SIMULAÇÃO -->
@@ -525,8 +542,8 @@ const authProd = getAuth(appProd);
 
 /* ============ ESTADO ============ */
 var pagina='painel', sessaoEmail='', currentRole=null, currentAtivo=false, podeEditar=false;
-var mps=[], comprasMP=[], massas=[], recheios=[], produtos=[];
-var cfgMP={}, cfgProduto={}, cenarios=[];
+var mps=[], comprasMP=[], massas=[], recheios=[], produtos=[], embalagens=[];
+var cfgMP={}, cfgProduto={}, cfgEmb={}, cenarios=[];
 var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20 };
 var simAtual={ id:null, nome:'Cenário sem título', ajustes:{}, globalPct:0, vendaPct:0 };
 var subs={};
@@ -535,11 +552,12 @@ var ord={
   produtos: { col:'nome',      dir:1  },
   receitas: { col:'custoKg',   dir:-1 },
   mp:       { col:'uso',       dir:-1 },
+  emb:      { col:'uso',       dir:-1 },
   detalhe:  { col:'nome',      dir:1  }
 };
 var ultimaCarga=null;
 
-const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], detalhe:['Detalhar Custo','Composição de matéria-prima por produto'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
+const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], emb:['Embalagens','Valor unitário e uso nos produtos'], detalhe:['Detalhar Custo','Composição de matéria-prima por produto'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
 
 /* ============ UTIL ============ */
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -637,6 +655,42 @@ function precoMP(codigo, sim){
   var g=num(sim.globalPct);
   if(g) return base.preco*(1+g/100);
   return base.preco;
+}
+
+/* ============ PREÇO DE EMBALAGEM ============ */
+function precoBaseEmb(codigo){
+  var k=String(codigo);
+  var ov=cfgEmb[k];
+  if(ov && num(ov.precoUn)>0) return { preco:num(ov.precoUn), origem:'manual', obs:(ov.obs||'') };
+  var e=null;
+  for(var i=0;i<embalagens.length;i++){ if(String(embalagens[i].codigo)===k){ e=embalagens[i]; break; } }
+  if(e && num(e.precoUn)>0){
+    var q=e.precoAtualizadoEm?('cadastro · '+String(e.precoAtualizadoEm).slice(0,10).split('-').reverse().join('/')):'cadastro';
+    return { preco:num(e.precoUn), origem:'cadastro', obs:q };
+  }
+  return { preco:0, origem:'sem', obs:'' };
+}
+function precoEmb(codigo, sim){
+  var base=precoBaseEmb(codigo);
+  if(!sim) return base.preco;
+  var k=String(codigo);
+  if(sim.ajustesEmb && sim.ajustesEmb[k]!=null && isFinite(sim.ajustesEmb[k])) return num(sim.ajustesEmb[k]);
+  var g=num(sim.globalPct);
+  if(g) return base.preco*(1+g/100);
+  return base.preco;
+}
+function embPorCodigo(codigo){
+  for(var i=0;i<embalagens.length;i++){ if(String(embalagens[i].codigo)===String(codigo)) return embalagens[i]; }
+  return null;
+}
+// quantos produtos usam cada embalagem
+function embUsadas(){
+  var u={};
+  Object.keys(cfgProduto).forEach(function(k){
+    var c=cfgProduto[k].embalagemCod;
+    if(c) u[String(c)]=(u[String(c)]||0)+1;
+  });
+  return u;
 }
 
 /* ============ CUSTO DE RECEITA ============ */
@@ -737,8 +791,20 @@ function custoProduto(p, sim){
   var custoMO=pesoUnKg*moKg*fatorMO;
   var custoFixo=pesoUnKg*fixoKg;
 
-  // embalagem: informada por pacote
+  // Embalagem. Prioridade: valor manual em R$/pacote > embalagem cadastrada × quantidade.
   var embPct=num(extra.embalagemPct);
+  var embCod=extra.embalagemCod||'';
+  var embQtd=num(extra.embalagemQtd)>0?num(extra.embalagemQtd):1;
+  var embNome='', embOrigem='';
+  if(embPct>0){ embOrigem='manual'; }
+  else if(embCod){
+    var eo=embPorCodigo(embCod);
+    embNome=eo?(eo.nome||embCod):('['+embCod+']');
+    var pu=precoEmb(embCod, sim);
+    embPct=pu*embQtd;
+    embOrigem=pu>0?'cadastro':'sem';
+    if(pu<=0) faltantes.push('embalagem "'+embNome+'" sem valor');
+  }
   var custoEmb=qtdPct>0?embPct/qtdPct:embPct;
 
   var custoUn=custoMP+custoMO+custoFixo+custoEmb;
@@ -766,6 +832,7 @@ function custoProduto(p, sim){
     p:p, extra:extra, comps:comps, faltantes:faltantes, fichaIncompleta:fichaIncompleta,
     custoMP:custoMP, perda:perda, custoMO:custoMO, custoFixo:custoFixo, custoEmb:custoEmb,
     custoUn:custoUn, custoKg:pesoUnKg>0?custoUn/pesoUnKg:null, custoPct:qtdPct>0?custoUn*qtdPct:null,
+    embCod:embCod, embQtd:embQtd, embNome:embNome, embOrigem:embOrigem, embPct:embPct,
     pesoUnG:pesoUnG, pesoUnKg:pesoUnKg, qtdPct:qtdPct,
     precoVendaUn:pvUn, precoVendaBruto:pv, baseVenda:base,
     despVar:despVar, lucro:lucro, margemPct:margemPct, mcR:mcR, mcPct:mcPct, markup:markup,
@@ -799,6 +866,14 @@ function diagnosticos(){
     sev:'warn', titulo:mpSem+' matéria'+(mpSem>1?'s':'')+'-prima sem preço',
     sub:'Usadas em receitas. O custo dos produtos afetados está subestimado.',
     acao:'Ver matérias-primas', pagina:'mp'
+  });
+
+  var embUso=embUsadas(), embSem=0;
+  Object.keys(embUso).forEach(function(k){ if(precoBaseEmb(k).preco<=0) embSem++; });
+  if(embSem>0) out.push({
+    sev:'warn', titulo:embSem+' embalagem'+(embSem>1?'ns':'')+' sem valor',
+    sub:'Usadas em produtos. O custo de embalagem desses produtos fica de fora.',
+    acao:'Ver embalagens', pagina:'emb'
   });
 
   var todos=todosCustos(null);
@@ -884,6 +959,7 @@ function render(){
   else if(pagina==='produtos') renderProdutos();
   else if(pagina==='receitas') renderReceitas();
   else if(pagina==='mp') renderMP();
+  else if(pagina==='emb') renderEmb();
   else if(pagina==='sim') renderSim();
   else if(pagina==='detalhe') renderDetalhe();
   else if(pagina==='config') renderConfig();
@@ -1450,6 +1526,104 @@ window.exportarDetalhe=function(){
   }).catch(function(e){ console.error('exportarDetalhe:',e); alert('Erro ao exportar: '+e.message); });
 };
 
+/* ---- EMBALAGENS ---- */
+var COLS_EMB=[
+  { k:'codigo', l:'Cód',                 v:function(x){ return String(x.e.codigo||''); } },
+  { k:'nome',   l:'Embalagem',           v:function(x){ return norm(x.e.nome); } },
+  { k:'tipo',   l:'Tipo',                v:function(x){ return norm(x.e.tipo||'OUTRO'); } },
+  { k:'unidade',l:'Un',                  v:function(x){ return norm(x.e.unidade||'UN'); } },
+  { k:'preco',  l:'Valor',          r:1, v:function(x){ return x.preco>0?x.preco:null; } },
+  { k:'origem', l:'Origem',              v:function(x){ return x.origem; } },
+  { k:'uso',    l:'Usada em',       r:1, v:function(x){ return x.uso; } }
+];
+function renderEmb(){
+  var usadas=embUsadas();
+  var q=norm(document.getElementById('eb-busca').value);
+  var f=document.getElementById('eb-filtro').value;
+  var tp=document.getElementById('eb-tipo').value;
+
+  // tipos disponíveis no filtro
+  var tipos={};
+  embalagens.forEach(function(e){ tipos[e.tipo||'OUTRO']=1; });
+  var selT=document.getElementById('eb-tipo');
+  if(selT){
+    var atual=selT.value;
+    selT.innerHTML='<option value="">Todos os tipos</option>'+Object.keys(tipos).sort().map(function(t){
+      return '<option value="'+esc(t)+'">'+esc(t)+'</option>'; }).join('');
+    if(atual) selT.value=atual;
+  }
+
+  var lista=embalagens.map(function(e){
+    var pb=precoBaseEmb(e.codigo);
+    return { e:e, preco:pb.preco, origem:pb.origem, obs:pb.obs, uso:usadas[String(e.codigo)]||0 };
+  }).filter(function(x){
+    if(q && norm(x.e.nome).indexOf(q)<0 && String(x.e.codigo).indexOf(q)<0) return false;
+    if(tp && (x.e.tipo||'OUTRO')!==tp) return false;
+    if(f==='usadas') return x.uso>0;
+    if(f==='sempreco') return x.preco<=0;
+    if(f==='manual') return x.origem==='manual';
+    return true;
+  });
+  ordenarPor(lista,'emb',COLS_EMB);
+
+  var html=thead('emb', COLS_EMB)+'<tbody>';
+  if(!embalagens.length){
+    html+='<tr><td colspan="'+COLS_EMB.length+'" class="empty">Nenhuma embalagem cadastrada. Cadastre no Produlog em <strong>Cadastros › Cadastro de Embalagens</strong>.</td></tr>';
+  } else if(!lista.length){
+    html+='<tr><td colspan="'+COLS_EMB.length+'" class="empty">Nenhuma embalagem encontrada.</td></tr>';
+  }
+  lista.forEach(function(x){
+    var pill=x.origem==='manual'?'<span class="pill p-warn">manual</span>':(x.origem==='cadastro'?'<span class="pill p-ok">cadastro</span>':'<span class="pill p-bad">sem valor</span>');
+    html+='<tr class="clickrow" data-k="'+esc(x.e.codigo)+'" onclick="abrirEmb(\''+esc(x.e.codigo)+'\')">'+
+      '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(x.e.codigo)+'</td>'+
+      '<td><div class="nm">'+esc(x.e.nome||'—')+'</div>'+(x.obs?'<div style="font-size:10.5px;color:var(--muted)">'+esc(x.obs)+'</div>':'')+'</td>'+
+      '<td style="font-size:11.5px;color:var(--muted)">'+esc(x.e.tipo||'OUTRO')+'</td>'+
+      '<td style="font-size:11.5px;color:var(--muted)">'+esc(x.e.unidade||'UN')+'</td>'+
+      '<td class="r num">'+(x.preco>0?fmtR$(x.preco,3):'—')+'</td>'+
+      '<td>'+pill+'</td>'+
+      '<td class="r num">'+(x.uso>0?x.uso:'—')+'</td></tr>';
+  });
+  document.getElementById('tbl-emb').innerHTML=html+'</tbody>';
+}
+window.abrirEmb=function(codigo){
+  var e=embPorCodigo(codigo); if(!e) return;
+  var ov=cfgEmb[String(codigo)]||{};
+  var pb=precoBaseEmb(codigo);
+  var usadas=embUsadas();
+  var n=usadas[String(codigo)]||0;
+  var quais=[];
+  Object.keys(cfgProduto).forEach(function(k){
+    if(String(cfgProduto[k].embalagemCod||'')===String(codigo)) quais.push(cfgProduto[k].nome||k);
+  });
+  modal({
+    titulo:esc(e.nome||codigo),
+    sub:'Código '+esc(codigo)+' · '+esc(e.tipo||'OUTRO')+' · '+esc(e.unidade||'UN')+' · vigente '+(pb.preco>0?fmtR$(pb.preco,3):'sem valor'),
+    body:
+      '<div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.5px">CADASTRO · PRODULOG</div>'+
+      '<div class="wf"><div class="wfrow" style="grid-template-columns:1fr 100px"><div>Valor cadastrado</div>'+
+        '<div class="r num">'+(num(e.precoUn)>0?fmtR$(e.precoUn,3):'<span style="color:var(--red)">—</span>')+'</div></div></div>'+
+      '<div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.5px;margin-top:19px">VALOR MANUAL (SOBREPÕE O CADASTRO)</div>'+
+      '<div class="fgrid" style="margin-top:9px">'+
+        '<div><label>Valor · R$/'+esc(e.unidade||'UN')+'</label><input type="number" id="eb-preco" step="0.001" value="'+(ov.precoUn||'')+'" '+(podeEditar?'':'disabled')+' />'+
+        '<div class="fhint">Deixe vazio para voltar a usar o valor do Produlog.</div></div>'+
+        '<div><label>Motivo / fonte</label><input type="text" id="eb-obs" value="'+esc(ov.obs||'')+'" placeholder="Ex: cotação nova" '+(podeEditar?'':'disabled')+' /></div>'+
+      '</div>'+
+      (n>0
+        ? '<div style="font-size:11px;color:var(--muted);font-weight:600;margin-top:19px">USADA EM '+n+' PRODUTO(S)</div>'+
+          '<div style="font-size:12px;margin-top:6px;line-height:1.7">'+quais.slice(0,25).map(esc).join(' · ')+(quais.length>25?' …':'')+'</div>'
+        : '<div class="alert a-info" style="margin-top:17px">◇ Nenhum produto usa esta embalagem ainda. Vincule no detalhe do produto, campo <strong>Embalagem</strong>.</div>'),
+    ok: podeEditar?'Salvar':null,
+    onOk:function(){
+      var v=document.getElementById('eb-preco').value;
+      setDoc(doc(dbC,'custosEmb',String(codigo)),
+        { codigo:String(codigo), nome:e.nome||'', precoUn:(v===''?0:num(v)),
+          obs:document.getElementById('eb-obs').value||'', atualizadoEm:agora(), atualizadoPor:sessaoEmail },
+        { merge:true })
+        .catch(function(err){ console.error('custosEmb:',err); alert('Erro ao salvar: '+(err.code||err.message)); });
+    }
+  });
+};
+
 /* ---- SIMULAÇÃO ---- */
 function renderSim(){
   // seletor de cenários
@@ -1694,7 +1868,7 @@ window.abrirProduto=function(chave){
       '<div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.5px;margin-top:19px">COMPOSIÇÃO DO CUSTO POR UNIDADE</div>'+
       '<div class="wf">'+
         linha('Matéria-prima'+(num(cfg.perdaPct)>0?' (inclui '+fmtPct(cfg.perdaPct)+' de perda)':''), c.custoMP, 'var(--primary)', refPct)+
-        linha('Embalagem', c.custoEmb, 'var(--blue)', refPct)+
+        linha('Embalagem'+(c.embNome?' · '+c.embNome+(c.embQtd!==1?' ×'+fmtN(c.embQtd,2):''):(c.embOrigem==='manual'?' (valor manual)':'')), c.custoEmb, 'var(--blue)', refPct)+
         linha('Mão de obra', c.custoMO, 'var(--amber)', refPct)+
         linha('Custos fixos', c.custoFixo, 'var(--purple)', refPct)+
         '<div class="wfrow tot"><div>Custo total / unidade</div><div class="r num">'+fmtR$(c.custoUn,4)+'</div><div></div></div>'+
@@ -1720,7 +1894,17 @@ window.abrirProduto=function(chave){
         '<div><label>Base do preço</label><select id="pd-base" '+(podeEditar?'':'disabled')+'>'+
           ['pct|por pacote','un|por unidade','kg|por kg'].map(function(o){ var v=o.split('|'); return '<option value="'+v[0]+'"'+(c.baseVenda===v[0]?' selected':'')+'>'+v[1]+'</option>'; }).join('')+
         '</select></div>'+
-        '<div><label>Embalagem · R$/pacote</label><input type="number" id="pd-emb" step="0.001" value="'+(extra.embalagemPct||'')+'" '+(podeEditar?'':'disabled')+' /></div>'+
+        '<div><label>Embalagem cadastrada</label><select id="pd-embcod" '+(podeEditar?'':'disabled')+'>'+
+          '<option value="">— nenhuma —</option>'+
+          embalagens.slice().sort(function(a,b){ return String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'); }).map(function(eo){
+            var pu=precoBaseEmb(eo.codigo).preco;
+            return '<option value="'+esc(eo.codigo)+'"'+(String(extra.embalagemCod||'')===String(eo.codigo)?' selected':'')+'>'+
+              esc(eo.nome)+' — '+(pu>0?fmtR$(pu,3):'sem valor')+'</option>';
+          }).join('')+'</select>'+
+          '<div class="fhint">Cadastro no Produlog. O custo por pacote sai de valor × quantidade.</div></div>'+
+        '<div><label>Qtd. de embalagem por pacote</label><input type="number" id="pd-embqtd" step="0.01" value="'+(num(extra.embalagemQtd)>0?num(extra.embalagemQtd):1)+'" '+(podeEditar?'':'disabled')+' /></div>'+
+        '<div><label>Ou valor manual · R$/pacote</label><input type="number" id="pd-emb" step="0.001" value="'+(extra.embalagemPct||'')+'" '+(podeEditar?'':'disabled')+' />'+
+          '<div class="fhint">Se preenchido, sobrepõe a embalagem cadastrada.</div></div>'+
         '<div><label>Fator de mão de obra</label><input type="number" id="pd-mo" step="0.05" value="'+(extra.fatorMO||1)+'" '+(podeEditar?'':'disabled')+' />'+
           '<div class="fhint">1 = normal. Use 1,5 para produtos mais artesanais.</div></div>'+
         '<div><label>Marca</label><input type="text" id="pd-marca" value="'+esc(extra.marca||'')+'" placeholder="Ex: MC" '+(podeEditar?'':'disabled')+' /></div>'+
@@ -1737,6 +1921,8 @@ window.abrirProduto=function(chave){
         precoVenda:num(document.getElementById('pd-pv').value),
         baseVenda:document.getElementById('pd-base').value,
         embalagemPct:num(document.getElementById('pd-emb').value),
+        embalagemCod:document.getElementById('pd-embcod').value||'',
+        embalagemQtd:num(document.getElementById('pd-embqtd').value)||1,
         fatorMO:num(document.getElementById('pd-mo').value)||1,
         marca:document.getElementById('pd-marca').value||'',
         embalagem:document.getElementById('pd-embtipo').value||'',
@@ -1860,6 +2046,10 @@ function liberar(d){
     cfgMP={}; s.docs.forEach(function(x){ cfgMP[x.id]=x.data(); }); render();
   }, function(e){ console.warn('custosMP:',e.code||e.message); });
 
+  if(!subs.embOv) subs.embOv=onSnapshot(collection(dbC,'custosEmb'), function(s){
+    cfgEmb={}; s.docs.forEach(function(x){ cfgEmb[x.id]=x.data(); }); render();
+  }, function(e){ console.warn('custosEmb:',e.code||e.message); });
+
   if(!subs.prodEx) subs.prodEx=onSnapshot(collection(dbC,'custosProduto'), function(s){
     cfgProduto={}; s.docs.forEach(function(x){ cfgProduto[x.id]=x.data(); }); render();
   }, function(e){ console.warn('custosProduto:',e.code||e.message); });
@@ -1903,6 +2093,10 @@ function ligarProdulog(){
   subs.produtos=onSnapshot(collection(dbProd,'produtosConfeitaria'), function(s){
     produtos=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
   }, function(e){ console.warn('produtosConfeitaria:',e.code||e.message); });
+
+  subs.emb=onSnapshot(collection(dbProd,'embalagens'), function(s){
+    embalagens=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
+  }, function(e){ console.warn('embalagens:',e.code||e.message); });
 }
 
 
@@ -1915,6 +2109,7 @@ var TABS={
   produtos:{ tbl:'tbl-produtos', cols:function(){ return COLS_PRODUTOS; }, busca:'pr-busca', abrir:function(k){ abrirProduto(k); } },
   receitas:{ tbl:'tbl-receitas', cols:function(){ return COLS_RECEITAS; }, busca:'rc-busca', abrir:function(k){ var q=k.split('|'); abrirReceita(q[0],q[1]); } },
   mp:      { tbl:'tbl-mp',       cols:function(){ return COLS_MP; },       busca:'mp-busca', abrir:function(k){ abrirMP(k); } },
+  emb:     { tbl:'tbl-emb',      cols:function(){ return COLS_EMB; },      busca:'eb-busca', abrir:function(k){ abrirEmb(k); } },
   detalhe: { tbl:'tbl-detalhe',  cols:function(){ return COLS_DET; },      busca:'dt-busca', abrir:function(k){ abrirProduto(k); } }
 };
 // Colunas editáveis direto na célula. Só onde o Custos é dono do dado (Comodato):
@@ -1927,6 +2122,10 @@ var EDITAVEIS={
   mp:{
     preco:{ tipo:'num', ler:function(k){ var o=cfgMP[k]||{}; return num(o.precoKg)||''; },
       salvar:function(k,v){ salvarPrecoMPRapido(k,num(v)); } }
+  },
+  emb:{
+    preco:{ tipo:'num', ler:function(k){ var o=cfgEmb[k]||{}; return num(o.precoUn)||''; },
+      salvar:function(k,v){ salvarPrecoEmbRapido(k,num(v)); } }
   },
   detalhe:{
     marca:{ tipo:'txt', ler:function(k){ return (cfgProduto[k]||{}).marca||''; },
@@ -1955,6 +2154,14 @@ function salvarPrecoMPRapido(codigo, v){
     { codigo:String(codigo), nome:(m?m.nome:'')||'', precoKg:num(v), obs:ov.obs||'',
       atualizadoEm:agora(), atualizadoPor:sessaoEmail }, { merge:true })
     .catch(function(e){ console.error('salvarPrecoMPRapido:',e); alert('Erro ao salvar: '+(e.code||e.message)); });
+}
+function salvarPrecoEmbRapido(codigo, v){
+  var e=embPorCodigo(codigo);
+  var ov=cfgEmb[String(codigo)]||{};
+  setDoc(doc(dbC,'custosEmb',String(codigo)),
+    { codigo:String(codigo), nome:(e?e.nome:'')||'', precoUn:num(v), obs:ov.obs||'',
+      atualizadoEm:agora(), atualizadoPor:sessaoEmail }, { merge:true })
+    .catch(function(err){ console.error('salvarPrecoEmbRapido:',err); alert('Erro ao salvar: '+(err.code||err.message)); });
 }
 function ehCampo(t){ return t && (t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable); }
 function modalAberto(){ return document.querySelector('#modal-host .mask'); }
@@ -2058,14 +2265,14 @@ window.abrirAtalhos=function(){
     ['Tab','Salva e vai para a pr\u00f3xima coluna (durante a edi\u00e7\u00e3o)'],
     ['Esc','Cancela a edi\u00e7\u00e3o \u203a fecha o modal \u203a solta o cursor'],
     ['/','Vai para a busca'],
-    ['1 \u2026 6','Troca de tela'],
+    ['1 \u2026 7','Troca de tela'],
     ['?','Mostra esta lista']
   ];
   modal({ titulo:'Atalhos de teclado', sub:'Os mesmos do Planner',
     body:'<div style="font-size:11px;color:var(--muted);margin-bottom:9px">Colunas edit\u00e1veis: <strong>Venda</strong> (Produtos), <strong>Pre\u00e7o/kg</strong> (Mat\u00e9rias-primas), <strong>Marca</strong>, <strong>Embalagem</strong> e <strong>Ativo</strong> (Detalhar Custo). Ficha t\u00e9cnica e pre\u00e7o de compra v\u00eam do Produlog.</div>'+
       L.map(function(x){ return '<div class="kbdrow"><div class="k"><span class="kbd">'+x[0]+'</span></div><div>'+x[1]+'</div></div>'; }).join('') });
 };
-var PAGS_NUM=['painel','produtos','receitas','mp','sim','config'];
+var PAGS_NUM=['painel','produtos','receitas','mp','emb','sim','config'];
 
 document.addEventListener('keydown', function(e){
   // Esc: cancela edição > fecha modal > solta o cursor
@@ -2090,7 +2297,7 @@ document.addEventListener('keydown', function(e){
   if(ehCampo(e.target) || modalAberto()) return;
 
   // 1..6 troca de tela
-  if(!e.ctrlKey && !e.metaKey && !e.altKey && /^[1-6]$/.test(e.key)){
+  if(!e.ctrlKey && !e.metaKey && !e.altKey && /^[1-7]$/.test(e.key)){
     e.preventDefault(); nav(PAGS_NUM[parseInt(e.key,10)-1]); return;
   }
   if(e.ctrlKey || e.metaKey || e.altKey) return;
