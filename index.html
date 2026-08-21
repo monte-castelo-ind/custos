@@ -89,7 +89,13 @@ h1{font-size:21px;font-weight:700;letter-spacing:-.4px}
 
 /* TABLE */
 .tw{background:var(--card);border:1px solid var(--border);border-radius:13px;overflow:hidden;box-shadow:var(--shadow)}
-.tscroll{overflow-x:auto}
+.tscroll{overflow:auto;max-height:calc(100vh - 232px)}
+.tw thead th{position:sticky;top:0;z-index:4}
+/* detalhe tem duas linhas de cabecalho: grupo em cima, colunas embaixo */
+.tdet thead tr:first-child th{top:0;height:26px}
+.tdet thead tr:nth-child(2) th{top:26px}
+.tdet thead .stk{z-index:7}
+#page-detalhe .tscroll{max-height:calc(100vh - 286px)}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:10px 12px;background:var(--card-2);border-bottom:1px solid var(--border);white-space:nowrap}
 th.r,td.r{text-align:right}
@@ -113,7 +119,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
 .tdet th.g1{color:var(--muted)} .tdet th.g2{color:var(--primary)} .tdet th.g3{color:var(--purple)} .tdet th.g4{color:var(--amber)}
 .tdet .sep{border-left:1px solid var(--border)}
 .tdet .stk{position:sticky;left:0;z-index:3;background:var(--card)}
-.tdet thead .stk{z-index:5;background:var(--card-2)}
+.tdet thead .stk{background:var(--card-2)}
 .tdet tbody tr:hover .stk{background:var(--card-2)}
 .tdet .mut{color:var(--muted)}
 .tdet .un{font-size:9.5px;color:var(--muted);font-weight:400;letter-spacing:.2px}
@@ -184,6 +190,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
   .navbtn{white-space:nowrap;width:auto;padding:8px 12px}
   main{padding:16px 14px 50px}
   .wfrow{grid-template-columns:1fr 78px 46px}
+  .tscroll,#page-detalhe .tscroll{max-height:none}
 }
 </style>
 </head>
@@ -314,6 +321,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
           <option value="">Todos</option>
           <option value="ativos">Só ativos</option>
           <option value="divergentes">Divergência de peso</option>
+          <option value="semgramatura">Recheio sem gramatura</option>
           <option value="semcusto">Sem custo</option>
         </select>
         <button class="btn btn-sm btn-ghost" onclick="exportarDetalhe()" style="margin-left:auto">⤓ Exportar Excel</button>
@@ -602,15 +610,19 @@ function custoProduto(p, sim){
   var comps=[], custoMP=0, faltantes=[], fichaIncompleta=false;
 
   function addComp(nome, tipoRec, gramas, rotulo){
-    if(!nome || num(gramas)<=0) return;
+    if(!nome) return;                       // nada selecionado: nao ha componente
+    var g=num(gramas);
     var rec=achaReceita(nome, tipoRec);
     if(!rec){ faltantes.push('receita "'+nome+'" não encontrada'); fichaIncompleta=true; return; }
     var cr=custoReceita(rec, sim);
     if(!cr || cr.custoKg<=0){ faltantes.push('receita "'+nome+'" sem custo'); fichaIncompleta=true; }
     if(cr && cr.faltantes.length) cr.faltantes.forEach(function(f){ faltantes.push('MP sem preço: '+f); });
-    var c=num(gramas)/1000*(cr?cr.custoKg:0);
+    // gramatura em branco no Produlog: registra o componente, sinaliza e nao soma custo
+    var semGr=(g<=0);
+    if(semGr){ faltantes.push(rotulo+' "'+nome+'" sem gramatura no Produlog'); fichaIncompleta=true; }
+    var c=semGr?0:(g/1000*(cr?cr.custoKg:0));
     custoMP+=c;
-    comps.push({ rotulo:rotulo, nome:nome, gramas:num(gramas), custoKg:(cr?cr.custoKg:0), custo:c, rec:rec });
+    comps.push({ rotulo:rotulo, nome:nome, gramas:g, custoKg:(cr?cr.custoKg:0), custo:c, rec:rec, semGr:semGr });
   }
   addComp(p.tipoMassa,'massa',p.grMassa,'Massa');
   addComp(p.tipoRecheio,'recheio',p.grRecheio,'Recheio 1');
@@ -947,7 +959,11 @@ function renderProdutos(){
   var html=thead('produtos', cols)+'<tbody>';
   if(!todos.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhum produto. Confirme se o Produlog tem produtos cadastrados em <span class="mono">produtosConfeitaria</span>.</td></tr>';
   todos.forEach(function(c){
-    var ficha=c.comps.map(function(x){ return esc(x.nome)+' <span class="mono" style="color:var(--muted)">'+fmtN(x.gramas,1)+'g</span>'; }).join(' + ')||'<span class="pill p-warn">sem ficha</span>';
+    var ficha=c.comps.map(function(x){
+      return esc(x.nome)+(x.semGr
+        ? ' <span class="pill p-warn" title="Gramatura não preenchida no Produlog — este componente não entra no custo">sem gramatura</span>'
+        : ' <span class="mono" style="color:var(--muted)">'+fmtN(x.gramas,1)+'g</span>');
+    }).join(' + ')||'<span class="pill p-warn">sem ficha</span>';
     html+='<tr class="clickrow" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
       '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
@@ -1112,6 +1128,7 @@ function renderDetalhe(){
     if(cl && x.p.classe!==cl) return false;
     if(f==='ativos') return x.ativo;
     if(f==='divergentes') return x.diverg!=null && x.diverg>2;
+    if(f==='semgramatura') return x.c.comps.some(function(k){ return k.semGr; });
     if(f==='semcusto') return !(x.custoUn>0);
     return true;
   });
@@ -1135,8 +1152,12 @@ function renderDetalhe(){
     var vazio='<span class="mut">—</span>';
     // R$ como prefixo discreto; unidades como sufixo discreto
     function mo(v,dec){ return (v!=null&&isFinite(v))?'<span class="un">R$</span> '+fmtN(v,dec==null?3:dec):vazio; }
-    function gr(v){
-      if(v==null||!isFinite(v)||v<=0) return vazio;
+    function gr(v,comp){
+      if(v==null||!isFinite(v)||v<=0){
+        // componente escolhido no Produlog mas sem gramatura: avisa em vez de sumir
+        if(comp) return '<span class="divg" title="Recheio selecionado no Produlog, mas sem gramatura — não entra no custo">falta \u26a0</span>';
+        return vazio;
+      }
       var d=(Math.abs(v)<1000 && v%1!==0)?1:0;
       return fmtN(v,d)+' <span class="un">gr</span>';
     }
@@ -1159,15 +1180,15 @@ function renderDetalhe(){
       '<td class="r num">'+qc+'</td>'+
       '<td class="sep">'+txt(x.m?x.m.nome:'')+'</td>'+
       '<td class="r num">'+mo(x.m&&x.m.custoKg>0?x.m.custoKg:null)+'</td>'+
-      '<td class="r num">'+gr(x.m?x.m.gramas:null)+'</td>'+
+      '<td class="r num">'+gr(x.m?x.m.gramas:null, x.m)+'</td>'+
       '<td class="r num">'+mo(x.m?x.m.custo:null)+'</td>'+
       '<td class="sep">'+txt(x.r1?x.r1.nome:'')+'</td>'+
       '<td class="r num">'+mo(x.r1&&x.r1.custoKg>0?x.r1.custoKg:null)+'</td>'+
-      '<td class="r num">'+gr(x.r1?x.r1.gramas:null)+'</td>'+
+      '<td class="r num">'+gr(x.r1?x.r1.gramas:null, x.r1)+'</td>'+
       '<td class="r num">'+mo(x.r1?x.r1.custo:null)+'</td>'+
       '<td>'+txt(x.r2?x.r2.nome:'')+'</td>'+
       '<td class="r num">'+mo(x.r2&&x.r2.custoKg>0?x.r2.custoKg:null)+'</td>'+
-      '<td class="r num">'+gr(x.r2?x.r2.gramas:null)+'</td>'+
+      '<td class="r num">'+gr(x.r2?x.r2.gramas:null, x.r2)+'</td>'+
       '<td class="r num">'+mo(x.r2?x.r2.custo:null)+'</td>'+
       '<td class="r num sep">'+mo(x.totRech>0?x.totRech:null)+'</td>'+
       '<td class="r num" style="font-weight:600">'+mo(x.custoUn>0?x.custoUn:null)+'</td>'+
