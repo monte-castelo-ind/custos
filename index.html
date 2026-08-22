@@ -947,16 +947,32 @@ function achaReceita(nome, tipo){
   var alt=(tipo==='massa'?'R|':'M|')+norm(nome);
   return receitaIdx[alt]||null;
 }
+// Kits antigos da Quadra guardam o ingrediente como {nome, qtd}; os novos como
+// {mpCodigo, mpNome, kg}. Aqui os dois formatos são aceitos, e sem mpCodigo a
+// matéria-prima é procurada pelo nome.
+function mpPorNome(nome){
+  if(!nome) return null;
+  var alvo=normSemAcento(nome);
+  for(var i=0;i<mps.length;i++){ if(normSemAcento(mps[i].nome)===alvo) return mps[i]; }
+  return null;
+}
 function custoReceita(rec, sim){
   if(!rec) return null;
   var ings=Array.isArray(rec.ingredientes)?rec.ingredientes:[];
   var somaKg=0, custo=0, faltantes=[], detalhe=[];
   ings.forEach(function(i){
-    var kg=num(i.kg), p=precoMP(i.mpCodigo, sim);
+    var kg=num(i.kg); if(!(kg>0)) kg=num(i.qtd);            // formato antigo usa 'qtd'
+    var nome=i.mpNome||i.nome||'';
+    var cod=i.mpCodigo;
+    if(cod==null||String(cod).trim()===''){                  // sem código: acha pelo nome
+      var mp=mpPorNome(nome);
+      cod=mp?mp.codigo:null;
+    }
+    var p=(cod!=null&&String(cod).trim()!=='')?precoMP(cod, sim):0;
     somaKg+=kg;
-    if(p<=0) faltantes.push(i.mpNome||i.mpCodigo);
+    if(p<=0) faltantes.push(nome||('código '+(cod||'?'))||'ingrediente sem nome');
     custo+=kg*p;
-    detalhe.push({ nome:i.mpNome||('['+i.mpCodigo+']'), codigo:String(i.mpCodigo), kg:kg, preco:p, custo:kg*p });
+    detalhe.push({ nome:(nome||('['+(cod||'?')+']')), codigo:String(cod||''), kg:kg, preco:p, custo:kg*p });
   });
   var rend=num(rec.rendimentoReal)>0?num(rec.rendimentoReal):(num(rec.rendimentoKg)>0?num(rec.rendimentoKg):somaKg);
   if(rend<=0) return { custoKg:0, rend:0, faltantes:faltantes, detalhe:detalhe, semIngredientes:ings.length===0 };
