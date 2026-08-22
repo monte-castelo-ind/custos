@@ -497,6 +497,23 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
     <!-- CONFIG -->
     <div class="page" id="page-config">
       <div id="cfg-aviso"></div>
+      <div class="sect">Preço de venda vindo do ERP</div>
+      <div class="card">
+        <div class="fgrid">
+          <div><label>Janela de apuração</label>
+            <select id="cfg-janela">
+              <option value="1">Último mês</option>
+              <option value="2">Últimos 2 meses</option>
+              <option value="3">Últimos 3 meses (~90 dias)</option>
+              <option value="6">Últimos 6 meses</option>
+              <option value="12">Últimos 12 meses</option>
+            </select>
+            <div class="fhint">O preço praticado é o faturamento dividido pela quantidade desta janela. Janela curta acompanha reajuste recente; janela longa é mais estável e sofre menos com mês atípico.</div>
+          </div>
+        </div>
+        <div id="cfg-janela-info" style="margin-top:12px"></div>
+      </div>
+
       <div class="sect">Fonte de preço das matérias-primas</div>
       <div class="card">
         <div class="fgrid">
@@ -575,7 +592,7 @@ const authProd = getAuth(appProd);
 var pagina='painel', sessaoEmail='', currentRole=null, currentAtivo=false, podeEditar=false;
 var mps=[], comprasMP=[], massas=[], recheios=[], produtos=[], embalagens=[];
 var cfgMP={}, cfgProduto={}, cfgEmb={}, cenarios=[], comercial=[];
-var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20 };
+var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20, janelaMeses:3 };
 var simAtual={ id:null, nome:'Cenário sem título', ajustes:{}, globalPct:0, vendaPct:0 };
 var subs={};
 var errosLeitura={};   // colecao -> code, para o aviso dizer o motivo certo
@@ -758,13 +775,44 @@ function produtosSemERP(){
   if(!comercial.length) return [];
   return produtos.filter(function(p){ return !vendaERP(p); });
 }
-// volume mensal médio: 3 meses quando houver, senão 12
+// Janela de apuração. O robô guarda o faturamento mês a mês, então a janela
+// é escolhida aqui — mudar não exige reprocessar nada.
+function janelaCfg(){ var n=num(cfg.janelaMeses); return n>0?Math.round(n):3; }
+function mesesDaJanela(n){
+  var hoje=new Date(), out=[];
+  for(var k=0;k<n;k++){
+    var d=new Date(hoje.getFullYear(), hoje.getMonth()-k, 1);
+    out.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
+  }
+  return out;
+}
+function somaJanela(c, n){
+  if(!c) return { qtd:0, valor:0, meses:0 };
+  var meses=c.meses||{}, q=0, v=0, comVenda=0;
+  mesesDaJanela(n).forEach(function(m){
+    var x=meses[m];
+    if(x){ q+=num(x.qtd); v+=num(x.valor); if(num(x.qtd)>0) comVenda++; }
+  });
+  return { qtd:q, valor:v, meses:comVenda };
+}
+// preço praticado na janela; se não vendeu nada nela, cai para 12 meses e sinaliza
+function precoERP(c){
+  if(!c) return null;
+  var n=janelaCfg();
+  var w=somaJanela(c,n);
+  if(w.qtd>0) return { preco:w.valor/w.qtd, janela:n, recente:true, meses:w.meses };
+  var w12=somaJanela(c,12);
+  if(w12.qtd>0) return { preco:w12.valor/w12.qtd, janela:12, recente:false, meses:w12.meses };
+  return null;
+}
+// volume mensal médio dentro da janela
 function volumeMes(c){
   if(!c) return 0;
-  var u3=c.ultimos3||{}, u12=c.ultimos12||{};
-  if(num(u3.qtd)>0) return num(u3.qtd)/3;
-  if(num(u12.qtd)>0) return num(u12.qtd)/12;
-  return 0;
+  var n=janelaCfg();
+  var w=somaJanela(c,n);
+  if(w.qtd>0) return w.qtd/n;
+  var w12=somaJanela(c,12);
+  return w12.qtd>0 ? w12.qtd/12 : 0;
 }
 
 /* ============ PREÇO DE EMBALAGEM ============ */
@@ -942,9 +990,14 @@ function custoProduto(p, sim){
   var pv=num(extra.precoVenda);
   var pvFonte=pv>0?'manual':'';
   var com=vendaERP(p);
+  var pERP=null;
   if(pv<=0 && com){
-    var pe=num(com.precoMedio3m)>0?num(com.precoMedio3m):num(com.precoMedio);
-    if(pe>0){ pv=pe; pvFonte='erp'; base='pct'; }   // ERP fatura pela unidade de venda
+    pERP=precoERP(com);
+    if(pERP && pERP.preco>0){
+      pv=pERP.preco;
+      pvFonte=pERP.recente?'erp':'erp-antigo';   // fora da janela: preço velho
+      base='pct';                                 // o ERP fatura pela unidade de venda
+    }
   }
   if(sim && num(sim.vendaPct)) pv=pv*(1+num(sim.vendaPct)/100);
   var pvUn=null;
@@ -968,7 +1021,7 @@ function custoProduto(p, sim){
     custoUn:custoUn, custoKg:pesoUnKg>0?custoUn/pesoUnKg:null, custoPct:qtdPct>0?custoUn*qtdPct:null,
     embCod:embCod, embQtd:embQtd, embNome:embNome, embOrigem:embOrigem, embPct:embPct, embFonte:embFonte,
     pesoUnG:pesoUnG, pesoUnKg:pesoUnKg, qtdPct:qtdPct,
-    precoVendaUn:pvUn, precoVendaBruto:pv, baseVenda:base, pvFonte:pvFonte,
+    precoVendaUn:pvUn, precoVendaBruto:pv, baseVenda:base, pvFonte:pvFonte, pERP:pERP,
     com:com, volMes:volumeMes(com),
     get lucroMes(){ if(!(this.volMes>0)||this.lucro==null) return null;
       return this.lucro*this.volMes*(this.qtdPct>0?this.qtdPct:1); },
@@ -1264,7 +1317,9 @@ function renderPainel(){
       '<td class="r num">'+(c.custoUn>0?(emBase(c,c.custoUn)!=null?fmtR$(emBase(c,c.custoUn),casasBase()):'—'):'—')+(c.fichaIncompleta?' <span class="pill p-warn">?</span>':'')+'</td>'+
       '<td class="r num">'+(c.custoKg?fmtR$(c.custoKg):'—')+'</td>'+
       '<td class="r num">'+(c.temPreco
-        ? (emBase(c,c.precoVendaUn)!=null?fmtR$(emBase(c,c.precoVendaUn),casasBase()):'—')+(c.pvFonte==='erp'?' <span class="pill p-ok" title="Preço praticado, vindo do ERP">ERP</span>':'')
+        ? (emBase(c,c.precoVendaUn)!=null?fmtR$(emBase(c,c.precoVendaUn),casasBase()):'—')+
+          (c.pvFonte==='erp'?' <span class="pill p-ok" title="Preço praticado no período escolhido">ERP</span>':'')+
+          (c.pvFonte==='erp-antigo'?' <span class="pill p-warn" title="Não vendeu na janela escolhida — usando a média de 12 meses">ERP antigo</span>':'')
         : '<span class="pill p-mut">definir</span>')+'</td>'+
       '<td class="r num">'+(c.mcPct!=null?fmtPct(c.mcPct):'—')+'</td>'+
       '<td class="r"><span class="pill '+corMargem(c.margemPct)+'">'+(c.margemPct!=null?fmtPct(c.margemPct):'—')+'</span></td>'+
@@ -1967,7 +2022,12 @@ function renderConc(){
       '<td><div class="nm">'+esc(x.p.nome||'—')+'</div></td>'+
       '<td>'+pill+'</td>'+
       '<td>'+sel+'</td>'+
-      '<td class="r num">'+(x.c?fmtR$(num(x.c.precoMedio3m)>0?x.c.precoMedio3m:x.c.precoMedio,2):'—')+'</td>'+
+      '<td class="r num">'+(function(){
+        if(!x.c) return '—';
+        var pe=precoERP(x.c);
+        if(!pe) return '<span style="color:var(--muted)">sem venda</span>';
+        return fmtR$(pe.preco,2)+(pe.recente?'':' <span class="pill p-warn" title="Fora da janela — média de 12 meses">antigo</span>');
+      })()+'</td>'+
       '<td class="r num">'+(x.c?fmtN(volumeMes(x.c),0):'—')+'</td></tr>';
   });
   document.getElementById('tbl-conc').innerHTML=html+'</tbody>';
@@ -2184,6 +2244,7 @@ window.abrirAjusteMP=function(){
 function renderConfig(){
   document.getElementById('cfg-aviso').innerHTML = podeEditar ? ''
     : '<div class="alert a-warn">⚠ Você está em modo leitura. Só administradores podem alterar as configurações.</div>';
+  document.getElementById('cfg-janela').value=String(janelaCfg());
   document.getElementById('cfg-fonte').value=cfg.fonte||'menor';
   document.getElementById('cfg-perda').value=cfg.perdaPct||0;
   document.getElementById('cfg-mo').value=cfg.moMes||0;
@@ -2193,9 +2254,33 @@ function renderConfig(){
   document.getElementById('cfg-com').value=cfg.comissaoPct||0;
   document.getElementById('cfg-frete').value=cfg.fretePct||0;
   document.getElementById('cfg-meta').value=cfg.margemAlvoPct||0;
-  ['cfg-fonte','cfg-perda','cfg-mo','cfg-fixo','cfg-kg','cfg-imp','cfg-com','cfg-frete','cfg-meta'].forEach(function(id){
+  ['cfg-janela','cfg-fonte','cfg-perda','cfg-mo','cfg-fixo','cfg-kg','cfg-imp','cfg-com','cfg-frete','cfg-meta'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.disabled=!podeEditar;
   });
+  // quanto a janela escolhida cobre hoje
+  var infoJ=document.getElementById('cfg-janela-info');
+  if(infoJ){
+    if(!comercial.length){
+      infoJ.innerHTML='<div class="alert a-info" style="margin:0">◇ Sem dados do ERP ainda.</div>';
+    } else {
+      var n=janelaCfg(), comP=0, antigos=0, semP=0;
+      produtos.forEach(function(p){
+        var c=vendaERP(p);
+        if(!c){ semP++; return; }
+        var pe=precoERP(c);
+        if(!pe) semP++; else if(pe.recente) comP++; else antigos++;
+      });
+      var per=mesesDaJanela(n);
+      infoJ.innerHTML='<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12.5px">'+
+        '<div><div style="font-size:11px;color:var(--muted)">PERÍODO</div><strong>'+per[per.length-1]+' a '+per[0]+'</strong></div>'+
+        '<div><div style="font-size:11px;color:var(--muted)">COM PREÇO NA JANELA</div><strong style="color:var(--green)">'+comP+'</strong></div>'+
+        '<div><div style="font-size:11px;color:var(--muted)">SÓ FORA DA JANELA</div><strong style="color:'+(antigos>0?'var(--amber)':'var(--muted)')+'">'+antigos+'</strong></div>'+
+        '<div><div style="font-size:11px;color:var(--muted)">SEM PREÇO</div><strong style="color:'+(semP>0?'var(--red)':'var(--muted)')+'">'+semP+'</strong></div>'+
+        '</div>'+
+        (antigos>0?'<div class="fhint" style="margin-top:8px">Os '+antigos+' de fora da janela usam a média de 12 meses e aparecem com <span class="pill p-warn">ERP antigo</span> no painel — não venderam no período escolhido.</div>':'');
+    }
+  }
+
   var kg=num(cfg.producaoKgMes);
   var moKg=kg>0?num(cfg.moMes)/kg:0, fxKg=kg>0?num(cfg.fixoMes)/kg:0;
   document.getElementById('cfg-rateio').innerHTML= kg>0
@@ -2207,6 +2292,7 @@ function renderConfig(){
 window.salvarConfig=function(){
   if(!podeEditar){ alert('Sem permissão para salvar.'); return; }
   var dados={
+    janelaMeses:num(document.getElementById('cfg-janela').value)||3,
     fonte:document.getElementById('cfg-fonte').value,
     perdaPct:num(document.getElementById('cfg-perda').value),
     moMes:num(document.getElementById('cfg-mo').value),
