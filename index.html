@@ -193,6 +193,11 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
 .alert{border-radius:10px;padding:10px 13px;font-size:12.5px;display:flex;gap:9px;align-items:flex-start;margin-bottom:12px}
 
 /* indicador de avisos */
+.baseseg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.basebtn{background:none;border:none;color:var(--muted);font-family:inherit;font-size:11.5px;font-weight:600;padding:5px 10px;letter-spacing:.02em}
+.basebtn+.basebtn{border-left:1px solid var(--border)}
+.basebtn:hover{color:var(--text);background:var(--card-2)}
+.basebtn.on{background:var(--side-active);color:var(--side-active-text)}
 .warnwrap{position:relative;display:none}
 .warnwrap.has{display:block}
 .warnbtn{position:relative;background:none;border:none;padding:3px 5px;line-height:1;font-size:17px;color:var(--amber);border-radius:8px;transition:background .12s}
@@ -311,6 +316,11 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
         <div class="warnwrap" id="warnWrap">
           <button class="warnbtn" id="warnBtn" onclick="toggleAvisos(event)" title="Pendências">&#9888;<span class="warnbadge" id="warnBadge">0</span></button>
           <div class="warnpop" id="warnPop"></div>
+        </div>
+        <div class="baseseg" title="Base de exibição dos valores">
+          <button class="basebtn" data-b="pct" onclick="trocarBase('pct')">Pacote</button>
+          <button class="basebtn" data-b="un" onclick="trocarBase('un')">Unidade</button>
+          <button class="basebtn" data-b="kg" onclick="trocarBase('kg')">Kg</button>
         </div>
         <button class="btn btn-sm btn-ghost" onclick="abrirAtalhos()" title="Atalhos de teclado (?)" style="padding:4px 9px;font-size:12px">⌨</button>
         <div id="freshness" style="font-size:11px;color:var(--muted)"></div>
@@ -577,6 +587,30 @@ var ord={
   detalhe:  { col:'nome',      dir:1  }
 };
 var ultimaCarga=null;
+// Base de exibição dos valores. 'pct' = por pacote (padrão: é como se vende e
+// como o ERP fatura). Não muda o cálculo, só a unidade em que ele é mostrado.
+var baseVis='pct';
+try{ var _bv=localStorage.getItem('mc_custos_base'); if(_bv==='un'||_bv==='kg'||_bv==='pct') baseVis=_bv; }catch(e){}
+function fatorBase(c){
+  if(baseVis==='pct') return (c.qtdPct>0?c.qtdPct:1);
+  if(baseVis==='kg')  return (c.pesoUnKg>0?1/c.pesoUnKg:0);
+  return 1;
+}
+function emBase(c, valorPorUn){
+  if(valorPorUn==null||!isFinite(valorPorUn)) return null;
+  var f=fatorBase(c);
+  return f>0?valorPorUn*f:null;
+}
+function sufBase(){ return baseVis==='pct'?'pct':(baseVis==='kg'?'kg':'un'); }
+function casasBase(){ return baseVis==='un'?3:2; }
+window.trocarBase=function(b){
+  baseVis=b;
+  try{ localStorage.setItem('mc_custos_base',b); }catch(e){}
+  document.querySelectorAll('.basebtn').forEach(function(el){
+    el.classList.toggle('on', el.getAttribute('data-b')===b);
+  });
+  render();
+};
 
 const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], emb:['Embalagens','Valor unitário e uso nos produtos'], detalhe:['Detalhar Custo','Composição de matéria-prima por produto'], conc:['Conciliar ERP','Ligar produto do Produlog ao nome do Protheus'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
 
@@ -1111,9 +1145,11 @@ var COLS_PAINEL=[
   { k:'cod',        l:'Cód',            v:function(c){ return String(c.p.cod||''); } },
   { k:'nome',       l:'Produto',        v:function(c){ return norm(c.p.nome); } },
   { k:'classe',     l:'Classe',         v:function(c){ return norm(c.p.classe); } },
-  { k:'custoUn',    l:'Custo/un',  r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
+  { k:'custoUn',    l:'Custo',  lf:function(){ return 'Custo/'+sufBase(); }, r:1,
+    v:function(c){ return c.custoUn>0?emBase(c,c.custoUn):null; } },
   { k:'custoKg',    l:'Custo/kg',  r:1, v:function(c){ return c.custoKg; } },
-  { k:'precoVendaUn',l:'Venda/un', r:1, v:function(c){ return c.precoVendaUn; } },
+  { k:'precoVendaUn',l:'Venda', lf:function(){ return 'Venda/'+sufBase(); }, r:1,
+    v:function(c){ return emBase(c,c.precoVendaUn); } },
   { k:'mcPct',      l:'Mg contrib.',r:1,v:function(c){ return c.mcPct; } },
   { k:'margemPct',  l:'Mg líq.',   r:1, v:function(c){ return c.margemPct; } },
   { k:'markup',     l:'Markup',    r:1, v:function(c){ return c.markup; } },
@@ -1127,7 +1163,8 @@ var COLS_PRODUTOS=[
   { k:'ficha',    l:'Ficha (massa · recheios)', v:function(c){ return c.comps.length; } },
   { k:'pesoUnG',  l:'Peso/un',     r:1, v:function(c){ return c.pesoUnG>0?c.pesoUnG:null; } },
   { k:'qtdPct',   l:'Un/pct',      r:1, v:function(c){ return c.qtdPct>0?c.qtdPct:null; } },
-  { k:'custoUn',  l:'Custo/un',    r:1, v:function(c){ return c.custoUn>0?c.custoUn:null; } },
+  { k:'custoUn',  l:'Custo', lf:function(){ return 'Custo/'+sufBase(); }, r:1,
+    v:function(c){ return c.custoUn>0?emBase(c,c.custoUn):null; } },
   { k:'precoVendaBruto', l:'Venda', r:1, v:function(c){ return c.temPreco?c.precoVendaBruto:null; } },
   { k:'margemPct',l:'Margem',      r:1, v:function(c){ return c.margemPct; } }
 ];
@@ -1219,10 +1256,10 @@ function renderPainel(){
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
       '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
       '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
-      '<td class="r num">'+(c.custoUn>0?fmtR$(c.custoUn,3):'—')+(c.fichaIncompleta?' <span class="pill p-warn">?</span>':'')+'</td>'+
+      '<td class="r num">'+(c.custoUn>0?(emBase(c,c.custoUn)!=null?fmtR$(emBase(c,c.custoUn),casasBase()):'—'):'—')+(c.fichaIncompleta?' <span class="pill p-warn">?</span>':'')+'</td>'+
       '<td class="r num">'+(c.custoKg?fmtR$(c.custoKg):'—')+'</td>'+
       '<td class="r num">'+(c.temPreco
-        ? fmtR$(c.precoVendaUn,3)+(c.pvFonte==='erp'?' <span class="pill p-ok" title="Preço praticado, vindo do ERP">ERP</span>':'')
+        ? (emBase(c,c.precoVendaUn)!=null?fmtR$(emBase(c,c.precoVendaUn),casasBase()):'—')+(c.pvFonte==='erp'?' <span class="pill p-ok" title="Preço praticado, vindo do ERP">ERP</span>':'')
         : '<span class="pill p-mut">definir</span>')+'</td>'+
       '<td class="r num">'+(c.mcPct!=null?fmtPct(c.mcPct):'—')+'</td>'+
       '<td class="r"><span class="pill '+corMargem(c.margemPct)+'">'+(c.margemPct!=null?fmtPct(c.margemPct):'—')+'</span></td>'+
@@ -1247,7 +1284,8 @@ function thead(tabela, cols){
   return '<thead><tr>'+cols.map(function(c){
     var ativa=(o.col===c.k);
     var seta=ativa?(o.dir>0?' \u25b2':' \u25bc'):'<span style="opacity:.25"> \u25b4\u25be</span>';
-    return '<th class="'+(c.r?'r ':'')+'sortable'+(ativa?' ord-on':'')+'" onclick="ordCol(\''+tabela+'\',\''+c.k+'\')" title="Ordenar por '+esc(c.l)+'">'+esc(c.l)+seta+'</th>';
+    var rot=(typeof c.lf==='function')?c.lf():c.l;
+    return '<th class="'+(c.r?'r ':'')+'sortable'+(ativa?' ord-on':'')+'" onclick="ordCol(\''+tabela+'\',\''+c.k+'\')" title="Ordenar por '+esc(rot)+'">'+esc(rot)+seta+'</th>';
   }).join('')+'</tr></thead>';
 }
 function ordenarPor(lista, tabela, cols){
@@ -1314,7 +1352,7 @@ function renderProdutos(){
       '<td style="white-space:normal;max-width:330px;font-size:12px">'+ficha+'</td>'+
       '<td class="r num">'+(c.pesoUnG>0?fmtN(c.pesoUnG,1)+'g':'—')+'</td>'+
       '<td class="r num">'+(c.qtdPct>0?fmtN(c.qtdPct,0):'—')+'</td>'+
-      '<td class="r num">'+(c.custoUn>0?fmtR$(c.custoUn,3):'—')+'</td>'+
+      '<td class="r num">'+(c.custoUn>0&&emBase(c,c.custoUn)!=null?fmtR$(emBase(c,c.custoUn),casasBase()):'—')+'</td>'+
       '<td class="r num">'+(c.temPreco?fmtR$(c.precoVendaBruto,2)+'<span style="font-size:10px;color:var(--muted)">/'+esc(c.baseVenda==='pct'?'pct':c.baseVenda)+'</span>':'—')+'</td>'+
       '<td class="r"><span class="pill '+corMargem(c.margemPct)+'">'+(c.margemPct!=null?fmtPct(c.margemPct):'—')+'</span></td></tr>';
   });
@@ -2186,10 +2224,13 @@ window.abrirProduto=function(chave){
   var extra=c.extra;
   var varPct=num(cfg.impostosPct)+num(cfg.comissaoPct)+num(cfg.fretePct);
 
+  var fb=fatorBase(c), casas=casasBase();
+  function vb(v){ return (v==null||!isFinite(v)||!(fb>0))?null:v*fb; }   // por unidade -> base escolhida
   function linha(rot,val,cor,pctBase){
     var pct=(pctBase>0&&val!=null)?(val/pctBase*100):null;
+    var mostra=vb(val);
     return '<div class="wfrow"><div>'+esc(rot)+(pct!=null?'<div class="wfbar"><i style="width:'+Math.min(100,Math.abs(pct))+'%;background:'+cor+'"></i></div>':'')+'</div>'+
-      '<div class="r num">'+(val!=null?fmtR$(val,4):'—')+'</div>'+
+      '<div class="r num">'+(mostra!=null?fmtR$(mostra,casas):'—')+'</div>'+
       '<div class="r num" style="color:var(--muted);font-size:11.5px">'+(pct!=null?fmtPct(pct,0):'')+'</div></div>';
   }
   var refPct=c.temPreco?c.precoVendaUn:c.custoUn;
@@ -2221,18 +2262,20 @@ window.abrirProduto=function(chave){
             : (c.embOrigem==='manual'?' (valor manual)':'')), c.custoEmb, 'var(--blue)', refPct)+
         linha('Mão de obra', c.custoMO, 'var(--amber)', refPct)+
         linha('Custos fixos', c.custoFixo, 'var(--purple)', refPct)+
-        '<div class="wfrow tot"><div>Custo total / unidade</div><div class="r num">'+fmtR$(c.custoUn,4)+'</div><div></div></div>'+
-        (c.custoKg?'<div class="wfrow" style="border:none"><div style="color:var(--muted)">Custo por kg</div><div class="r num">'+fmtR$(c.custoKg)+'</div><div></div></div>':'')+
-        (c.custoPct?'<div class="wfrow" style="border:none"><div style="color:var(--muted)">Custo por pacote</div><div class="r num">'+fmtR$(c.custoPct)+'</div><div></div></div>':'')+
+        '<div class="wfrow tot"><div>Custo total / '+(baseVis==='pct'?'pacote':(baseVis==='kg'?'kg':'unidade'))+'</div><div class="r num">'+(vb(c.custoUn)!=null?fmtR$(vb(c.custoUn),casas):'—')+'</div><div></div></div>'+
+        // as outras bases ficam visíveis para conferência
+        (baseVis!=='un'?'<div class="wfrow" style="border:none"><div style="color:var(--muted)">Custo por unidade</div><div class="r num">'+fmtR$(c.custoUn,4)+'</div><div></div></div>':'')+
+        (baseVis!=='kg'&&c.custoKg?'<div class="wfrow" style="border:none"><div style="color:var(--muted)">Custo por kg</div><div class="r num">'+fmtR$(c.custoKg)+'</div><div></div></div>':'')+
+        (baseVis!=='pct'&&c.custoPct?'<div class="wfrow" style="border:none"><div style="color:var(--muted)">Custo por pacote</div><div class="r num">'+fmtR$(c.custoPct)+'</div><div></div></div>':'')+
       '</div>'+
       (c.temPreco?
         '<div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.5px;margin-top:19px">RESULTADO POR UNIDADE</div>'+
         '<div class="wf">'+
-          '<div class="wfrow"><div>Preço de venda</div><div class="r num">'+fmtR$(c.precoVendaUn,4)+'</div><div class="r num" style="color:var(--muted);font-size:11.5px">100%</div></div>'+
+          '<div class="wfrow"><div>Preço de venda</div><div class="r num">'+(vb(c.precoVendaUn)!=null?fmtR$(vb(c.precoVendaUn),casas):'—')+'</div><div class="r num" style="color:var(--muted);font-size:11.5px">100%</div></div>'+
           linha('(−) Impostos, comissão e frete ('+fmtPct(varPct)+')', -c.despVar, 'var(--red)', refPct)+
           linha('(−) Custo total', -c.custoUn, 'var(--muted)', refPct)+
-          '<div class="wfrow tot"><div>Lucro por unidade</div><div class="r num" style="color:'+(c.lucro>=0?'var(--green)':'var(--red)')+'">'+fmtR$(c.lucro,4)+'</div><div class="r num">'+fmtPct(c.margemPct)+'</div></div>'+
-          '<div class="wfrow" style="border:none"><div style="color:var(--muted)">Margem de contribuição</div><div class="r num">'+fmtR$(c.mcR,4)+'</div><div class="r num" style="color:var(--muted)">'+fmtPct(c.mcPct)+'</div></div>'+
+          '<div class="wfrow tot"><div>Lucro por '+(baseVis==='pct'?'pacote':(baseVis==='kg'?'kg':'unidade'))+'</div><div class="r num" style="color:'+(c.lucro>=0?'var(--green)':'var(--red)')+'">'+(vb(c.lucro)!=null?fmtR$(vb(c.lucro),casas):'—')+'</div><div class="r num">'+fmtPct(c.margemPct)+'</div></div>'+
+          '<div class="wfrow" style="border:none"><div style="color:var(--muted)">Margem de contribuição</div><div class="r num">'+(vb(c.mcR)!=null?fmtR$(vb(c.mcR),casas):'—')+'</div><div class="r num" style="color:var(--muted)">'+fmtPct(c.mcPct)+'</div></div>'+
           '<div class="wfrow" style="border:none"><div style="color:var(--muted)">Markup sobre custo</div><div class="r num">'+(c.markup?fmtN(c.markup,2)+'×':'—')+'</div><div></div></div>'+
           '<div class="wfrow" style="border:none"><div style="color:var(--muted)">Preço para atingir '+fmtPct(cfg.margemAlvoPct)+'</div><div class="r num">'+precoAlvo(c)+'</div><div></div></div>'+
         '</div>'
@@ -2294,7 +2337,9 @@ function precoAlvo(c){
   var varPct=num(cfg.impostosPct)+num(cfg.comissaoPct)+num(cfg.fretePct);
   var den=1-varPct/100-num(cfg.margemAlvoPct)/100;
   if(den<=0||c.custoUn<=0) return '—';
-  var pv=c.custoUn/den;
+  var pv=c.custoUn/den;                       // por unidade
+  if(baseVis==='pct' && c.qtdPct>0) return fmtR$(pv*c.qtdPct,2)+'/pct · '+fmtR$(pv,4)+'/un';
+  if(baseVis==='kg' && c.pesoUnKg>0) return fmtR$(pv/c.pesoUnKg,2)+'/kg · '+fmtR$(pv,4)+'/un';
   var txt=fmtR$(pv,4)+'/un';
   if(c.qtdPct>0) txt+=' · '+fmtR$(pv*c.qtdPct,2)+'/pct';
   return txt;
@@ -2410,6 +2455,9 @@ function liberar(d){
   document.getElementById('urole').textContent=(currentRole==='admin'?'Administrador':(podeEditar?'Custos · edição':'Custos · leitura'));
   document.getElementById('uavatar').textContent=(nome||'?').trim().charAt(0).toUpperCase();
   document.body.classList.toggle('is-admin', currentRole==='admin');
+  document.querySelectorAll('.basebtn').forEach(function(el){
+    el.classList.toggle('on', el.getAttribute('data-b')===baseVis);
+  });
   if(pagina==='detalhe' && currentRole!=='admin') nav('produtos');
 
   // COMODATO (leitura + escrita)
