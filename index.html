@@ -436,7 +436,8 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
         <select id="cc-filtro" onchange="render()">
           <option value="pendentes">Sem par (pendentes)</option>
           <option value="ligados">Ligados na mão</option>
-          <option value="auto">Casados pelo nome</option>
+          <option value="codigo">Casados por código</option>
+        <option value="auto">Casados pelo nome</option>
           <option value="ignorados">Ignorados</option>
           <option value="">Todos</option>
         </select>
@@ -725,6 +726,8 @@ function indexarComercial(){
     if(c.codigo) comIdxCod[String(c.codigo).trim()]=c;
     if(c.nomeNorm) comIdxNome[c.nomeNorm]=c;
     else if(c.nome) comIdxNome[normSemAcento(c.nome)]=c;
+    // todas as grafias que o ERP usou para este código também casam
+    (c.nomesERP||[]).forEach(function(n){ var k=normSemAcento(n); if(!comIdxNome[k]) comIdxNome[k]=c; });
   });
 }
 var IGNORAR='__ignorar__';
@@ -745,6 +748,8 @@ function fonteVinculo(p){
   var ex=cfgProduto[chaveProduto(p)]||{};
   if(ex.erpChave===IGNORAR) return 'ignorado';
   if(ex.erpChave && comIdxId[ex.erpChave]) return 'manual';
+  var cod=(p.cod!=null?String(p.cod).trim():'');
+  if(cod && comIdxCod[cod]) return 'codigo';
   if(vendaERP(p)) return 'auto';
   return 'pendente';
 }
@@ -1868,10 +1873,22 @@ function erpJaUsados(chaveAtual){
 }
 function sugestoes(p, n){
   var usados=erpJaUsados(chaveProduto(p));
+  var cod=(p.cod!=null?String(p.cod).trim():'');
   return comercial
-    .map(function(c){ return { c:c, s:similaridade(p.nome, c.nome), usado:!!usados[c.id] }; })
+    .map(function(c){
+      // código igual é certeza, não palpite
+      var mesmoCod=(cod && String(c.codigo||'').trim()===cod);
+      var s=mesmoCod?1:similaridade(p.nome, c.nome);
+      // compara também com as outras grafias do ERP
+      (c.nomesERP||[]).forEach(function(nm){ var v=similaridade(p.nome,nm); if(v>s) s=v; });
+      return { c:c, s:s, cod:mesmoCod, usado:!!usados[c.id] };
+    })
     .filter(function(x){ return x.s>0.25; })
-    .sort(function(a,b){ if(a.usado!==b.usado) return a.usado?1:-1; return b.s-a.s; })
+    .sort(function(a,b){
+      if(a.cod!==b.cod) return a.cod?-1:1;
+      if(a.usado!==b.usado) return a.usado?1:-1;
+      return b.s-a.s;
+    })
     .slice(0, n||8);
 }
 function renderConc(){
@@ -1884,6 +1901,7 @@ function renderConc(){
     return { p:p, fonte:fonte, c:c, sug:(fonte==='pendente'?sugestoes(p,8):[]) };
   });
   var nPend=linhas.filter(function(x){ return x.fonte==='pendente'; }).length;
+  var nCod =linhas.filter(function(x){ return x.fonte==='codigo'; }).length;
   var nAuto=linhas.filter(function(x){ return x.fonte==='auto'; }).length;
   var nMan =linhas.filter(function(x){ return x.fonte==='manual'; }).length;
   var nIgn =linhas.filter(function(x){ return x.fonte==='ignorado'; }).length;
@@ -1892,6 +1910,7 @@ function renderConc(){
   document.getElementById('conc-kpis').innerHTML=[
     '<div class="card"><div class="klabel">Produtos</div><div class="kval">'+produtos.length+'</div><div class="khint">no Produlog</div></div>',
     '<div class="card"><div class="klabel">Sem par</div><div class="kval" style="color:'+(nPend>0?'var(--amber)':'var(--green)')+'">'+nPend+'</div><div class="khint">sem preço nem volume</div></div>',
+    '<div class="card"><div class="klabel">Casados por código</div><div class="kval" style="color:'+(nCod>0?'var(--green)':'')+'">'+nCod+'</div><div class="khint">código do ERP igual</div></div>',
     '<div class="card"><div class="klabel">Casados pelo nome</div><div class="kval">'+nAuto+'</div><div class="khint">nome idêntico</div></div>',
     '<div class="card"><div class="klabel">Ligados na mão</div><div class="kval">'+nMan+'</div><div class="khint">'+(nIgn>0?nIgn+' ignorado(s)':'nesta tela')+'</div></div>',
     '<div class="card"><div class="klabel">Sugestão forte</div><div class="kval" style="color:'+(quaseCertos>0?'var(--primary)':'')+'">'+quaseCertos+'</div><div class="khint">acima de 90% de semelhança</div></div>'
@@ -1901,6 +1920,7 @@ function renderConc(){
     if(q && norm(x.p.nome).indexOf(q)<0 && String(x.p.cod||'').indexOf(q)<0) return false;
     if(f==='pendentes') return x.fonte==='pendente';
     if(f==='ligados')   return x.fonte==='manual';
+    if(f==='codigo')    return x.fonte==='codigo';
     if(f==='auto')      return x.fonte==='auto';
     if(f==='ignorados') return x.fonte==='ignorado';
     return true;
@@ -1915,14 +1935,15 @@ function renderConc(){
   if(!lista.length) html+='<tr><td colspan="6" class="empty">Nada aqui. '+(nPend===0?'Todos os produtos estão ligados. ✓':'')+'</td></tr>';
   lista.slice(0,300).forEach(function(x){
     var chave=chaveProduto(x.p);
-    var pill=x.fonte==='auto'?'<span class="pill p-ok">nome</span>'
+    var pill=x.fonte==='codigo'?'<span class="pill p-ok">código</span>'
+           :x.fonte==='auto'?'<span class="pill p-ok">nome</span>'
            :x.fonte==='manual'?'<span class="pill p-ok">ligado</span>'
            :x.fonte==='ignorado'?'<span class="pill p-mut">ignorado</span>'
            :'<span class="pill p-warn">sem par</span>';
     var sel;
     if(x.fonte==='ignorado'){
       sel='<button class="btn btn-sm btn-ghost" onclick="ligarERP(\''+esc(chave)+'\',\'\')">Reativar</button>';
-    } else if(x.fonte==='auto'){
+    } else if(x.fonte==='auto'||x.fonte==='codigo'){
       sel='<span style="font-size:12.5px">'+esc(x.c.nome)+'</span>';
     } else {
       var opts='<option value="">— escolher —</option>';
@@ -1930,11 +1951,12 @@ function renderConc(){
       var jaTem=(x.fonte==='manual'&&x.c)?x.c.id:null;
       (x.fonte==='manual'?sugestoes(x.p,8):x.sug).forEach(function(s){
         if(s.c.id===jaTem) return;
-        opts+='<option value="'+esc(s.c.id)+'">'+esc(s.c.nome)+' — '+Math.round(s.s*100)+'%'+(s.usado?' (já usado)':'')+'</option>';
+        opts+='<option value="'+esc(s.c.id)+'">'+esc(s.c.nome)+(s.c.codigo?' ['+esc(s.c.codigo)+']':'')+' — '+
+          (s.cod?'mesmo código':Math.round(s.s*100)+'%')+(s.usado?' · já usado':'')+'</option>';
       });
       opts+='<optgroup label="Todos os produtos do ERP">'+
         comercial.slice().sort(function(a,b){ return String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'); })
-          .map(function(c){ return '<option value="'+esc(c.id)+'">'+esc(c.nome)+'</option>'; }).join('')+'</optgroup>';
+          .map(function(c){ return '<option value="'+esc(c.id)+'">'+esc(c.nome)+(c.codigo?' ['+esc(c.codigo)+']':'')+'</option>'; }).join('')+'</optgroup>';
       sel='<div style="display:flex;gap:6px;align-items:center">'+
           '<select onchange="ligarERP(\''+esc(chave)+'\',this.value)" '+(podeEditar?'':'disabled')+' style="min-width:230px">'+opts+'</select>'+
           (x.fonte==='pendente'?'<button class="btn btn-sm btn-ghost" title="Este produto não é vendido — parar de cobrar" onclick="ligarERP(\''+esc(chave)+'\',\''+IGNORAR+'\')">✕</button>':'')+
