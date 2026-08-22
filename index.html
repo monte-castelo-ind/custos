@@ -289,6 +289,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
     <button class="navbtn" data-p="mp" onclick="nav('mp')"><span class="side-ico">◇</span><span class="lbl">Matérias-primas</span></button>
     <button class="navbtn" data-p="emb" onclick="nav('emb')"><span class="side-ico">▢</span><span class="lbl">Embalagens</span></button>
     <button class="navbtn admin-only" data-p="detalhe" onclick="nav('detalhe')"><span class="side-ico">☷</span><span class="lbl">Detalhar Custo</span></button>
+    <button class="navbtn admin-only" data-p="conc" onclick="nav('conc')"><span class="side-ico">⇆</span><span class="lbl">Conciliar ERP</span></button>
     <button class="navbtn" data-p="sim" onclick="nav('sim')"><span class="side-ico">⇄</span><span class="lbl">Simulação</span></button>
     <button class="navbtn" data-p="config" onclick="nav('config')"><span class="side-ico">⚙</span><span class="lbl">Configurações</span></button>
     <div class="side-foot">
@@ -414,6 +415,24 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
         <select id="eb-tipo" onchange="render()"><option value="">Todos os tipos</option></select>
       </div>
       <div class="tw"><div class="tscroll"><table id="tbl-emb"></table></div></div>
+    </div>
+
+    <!-- CONCILIAÇÃO ERP (admin) -->
+    <div class="page" id="page-conc">
+      <div class="alert a-info">⇆ O ERP não traz código de produto, então o app casa pelo nome. Aqui você liga na mão o que ficou sem par — cada ligação vale para sempre e não precisa mexer no Protheus nem no Produlog.</div>
+      <div class="grid kpis" id="conc-kpis"></div>
+      <div class="tools" style="margin-top:14px">
+        <input type="text" id="cc-busca" placeholder="Buscar produto..." oninput="render()" />
+        <select id="cc-filtro" onchange="render()">
+          <option value="pendentes">Sem par (pendentes)</option>
+          <option value="ligados">Ligados na mão</option>
+          <option value="auto">Casados pelo nome</option>
+          <option value="ignorados">Ignorados</option>
+          <option value="">Todos</option>
+        </select>
+        <button class="btn btn-sm btn-ghost" onclick="conciliarAuto()" style="margin-left:auto">✦ Sugerir e aplicar acima de 90%</button>
+      </div>
+      <div class="tw"><div class="tscroll"><table id="tbl-conc"></table></div></div>
     </div>
 
     <!-- SIMULAÇÃO -->
@@ -559,7 +578,7 @@ var ord={
 };
 var ultimaCarga=null;
 
-const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], emb:['Embalagens','Valor unitário e uso nos produtos'], detalhe:['Detalhar Custo','Composição de matéria-prima por produto'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
+const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], emb:['Embalagens','Valor unitário e uso nos produtos'], detalhe:['Detalhar Custo','Composição de matéria-prima por produto'], conc:['Conciliar ERP','Ligar produto do Produlog ao nome do Protheus'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
 
 /* ============ UTIL ============ */
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -615,7 +634,7 @@ window.togglePin=function(e){
 /* ============ NAV ============ */
 window.nav=function(p){
   if(!TITLES[p]) return;
-  if(p==='detalhe' && currentRole!=='admin') p='produtos';
+  if((p==='detalhe'||p==='conc') && currentRole!=='admin') p='produtos';
   pagina=p;
   document.querySelectorAll('.page').forEach(function(el){ el.classList.remove('on'); });
   var pg=document.getElementById('page-'+p); if(pg) pg.classList.add('on');
@@ -664,22 +683,36 @@ function precoMP(codigo, sim){
 /* ============ VENDA REAL (ERP) ============ */
 // O robô grava em comercialProduto: preço praticado e volume por produto.
 // Casamento com o Produlog: por código primeiro, por nome normalizado depois.
-var comIdxCod={}, comIdxNome={};
+var comIdxCod={}, comIdxNome={}, comIdxId={};
 function indexarComercial(){
-  comIdxCod={}; comIdxNome={};
+  comIdxCod={}; comIdxNome={}; comIdxId={};
   comercial.forEach(function(c){
+    comIdxId[c.id]=c;
     if(c.codigo) comIdxCod[String(c.codigo).trim()]=c;
     if(c.nomeNorm) comIdxNome[c.nomeNorm]=c;
     else if(c.nome) comIdxNome[normSemAcento(c.nome)]=c;
   });
 }
+var IGNORAR='__ignorar__';
 function vendaERP(p){
   if(!comercial.length) return null;
+  // 1) ligação feita na mão na tela de Conciliação — vence tudo
+  var ex=cfgProduto[chaveProduto(p)]||{};
+  if(ex.erpChave===IGNORAR) return null;
+  if(ex.erpChave && comIdxId[ex.erpChave]) return comIdxId[ex.erpChave];
+  // 2) código (o CSV do ERP hoje não traz, mas fica pronto se um dia trouxer)
   var cod=(p.cod!=null?String(p.cod).trim():'');
   if(cod && comIdxCod[cod]) return comIdxCod[cod];
-  // o CSV do ERP não traz código de produto, então na prática o casamento é por nome
+  // 3) nome idêntico depois de normalizar
   if(p.nome && comIdxNome[normSemAcento(p.nome)]) return comIdxNome[normSemAcento(p.nome)];
   return null;
+}
+function fonteVinculo(p){
+  var ex=cfgProduto[chaveProduto(p)]||{};
+  if(ex.erpChave===IGNORAR) return 'ignorado';
+  if(ex.erpChave && comIdxId[ex.erpChave]) return 'manual';
+  if(vendaERP(p)) return 'auto';
+  return 'pendente';
 }
 // quantos produtos do Produlog não acharam par no ERP
 function produtosSemERP(){
@@ -959,11 +992,14 @@ function diagnosticos(){
       acao:'Ver produtos', pagina:'produtos'
     });
   } else {
-    var semPar=produtosSemERP().length;
+    var semPar=produtosSemERP().filter(function(p){
+      return (cfgProduto[chaveProduto(p)]||{}).erpChave!==IGNORAR;   // ignorados não contam
+    }).length;
     if(semPar>0) out.push({
       sev:'warn', titulo:semPar+' produto(s) sem par no ERP',
-      sub:'O ERP não traz código de produto, então o casamento é pelo nome. Nome diferente entre Produlog e Protheus deixa o produto sem preço e sem volume.',
-      acao:'Ver produtos', pagina:'produtos'
+      sub:'Ficam sem preço praticado e sem volume. Ligue na tela de Conciliação — o app sugere o nome mais parecido.',
+      acao: currentRole==='admin'?'Ir para Conciliar ERP':'Ver produtos',
+      pagina: currentRole==='admin'?'conc':'produtos'
     });
   }
 
@@ -1053,6 +1089,7 @@ function render(){
   else if(pagina==='emb') renderEmb();
   else if(pagina==='sim') renderSim();
   else if(pagina==='detalhe') renderDetalhe();
+  else if(pagina==='conc') renderConc();
   else if(pagina==='config') renderConfig();
   if(typeof aplicarCursor==='function' && !grid.editando) aplicarCursor();
 }
@@ -1752,6 +1789,166 @@ window.abrirEmb=function(codigo){
   });
 };
 
+/* ---- CONCILIAÇÃO ERP (admin) ---- */
+var VAZIAS={DE:1,DA:1,DO:1,DAS:1,DOS:1,COM:1,SEM:1,E:1,C:1,P:1,A:1,O:1};
+function tokensNome(s){
+  return normSemAcento(s)
+    .replace(/(\d)\s*(GR|G|KG|ML|L|UN)\b/g,'$1$2')      // "50 GR" -> "50GR"
+    .replace(/[^A-Z0-9]+/g,' ')
+    .split(' ')
+    .filter(function(t){ return t && t.length>1 && !VAZIAS[t]; })
+    .map(function(t){ return (t.length>3 && /S$/.test(t) && !/\d/.test(t)) ? t.slice(0,-1) : t; });
+}
+function bigramas(s){
+  var t=normSemAcento(s).replace(/[^A-Z0-9]/g,''), o=[];
+  for(var i=0;i<t.length-1;i++) o.push(t.substr(i,2));
+  return o;
+}
+function _dice(a,b){
+  if(!a.length||!b.length) return 0;
+  var m={}, hit=0;
+  a.forEach(function(x){ m[x]=(m[x]||0)+1; });
+  b.forEach(function(x){ if(m[x]>0){ m[x]--; hit++; } });
+  return 2*hit/(a.length+b.length);
+}
+// palavras iguais pesam mais que parecença de escrita
+function similaridade(a,b){
+  if(!a||!b) return 0;
+  if(normSemAcento(a)===normSemAcento(b)) return 1;
+  return _dice(tokensNome(a),tokensNome(b))*0.65 + _dice(bigramas(a),bigramas(b))*0.35;
+}
+// ERP já usados por outro produto: não sugerir de novo
+function erpJaUsados(chaveAtual){
+  var u={};
+  produtos.forEach(function(p){
+    var k=chaveProduto(p);
+    if(k===chaveAtual) return;
+    var c=vendaERP(p);
+    if(c) u[c.id]=true;
+  });
+  return u;
+}
+function sugestoes(p, n){
+  var usados=erpJaUsados(chaveProduto(p));
+  return comercial
+    .map(function(c){ return { c:c, s:similaridade(p.nome, c.nome), usado:!!usados[c.id] }; })
+    .filter(function(x){ return x.s>0.25; })
+    .sort(function(a,b){ if(a.usado!==b.usado) return a.usado?1:-1; return b.s-a.s; })
+    .slice(0, n||8);
+}
+function renderConc(){
+  var q=norm(document.getElementById('cc-busca').value);
+  var f=document.getElementById('cc-filtro').value;
+
+  var linhas=produtos.map(function(p){
+    var fonte=fonteVinculo(p);
+    var c=vendaERP(p);
+    return { p:p, fonte:fonte, c:c, sug:(fonte==='pendente'?sugestoes(p,8):[]) };
+  });
+  var nPend=linhas.filter(function(x){ return x.fonte==='pendente'; }).length;
+  var nAuto=linhas.filter(function(x){ return x.fonte==='auto'; }).length;
+  var nMan =linhas.filter(function(x){ return x.fonte==='manual'; }).length;
+  var nIgn =linhas.filter(function(x){ return x.fonte==='ignorado'; }).length;
+  var quaseCertos=linhas.filter(function(x){ return x.fonte==='pendente' && x.sug.length && x.sug[0].s>=0.9 && !x.sug[0].usado; }).length;
+
+  document.getElementById('conc-kpis').innerHTML=[
+    '<div class="card"><div class="klabel">Produtos</div><div class="kval">'+produtos.length+'</div><div class="khint">no Produlog</div></div>',
+    '<div class="card"><div class="klabel">Sem par</div><div class="kval" style="color:'+(nPend>0?'var(--amber)':'var(--green)')+'">'+nPend+'</div><div class="khint">sem preço nem volume</div></div>',
+    '<div class="card"><div class="klabel">Casados pelo nome</div><div class="kval">'+nAuto+'</div><div class="khint">nome idêntico</div></div>',
+    '<div class="card"><div class="klabel">Ligados na mão</div><div class="kval">'+nMan+'</div><div class="khint">'+(nIgn>0?nIgn+' ignorado(s)':'nesta tela')+'</div></div>',
+    '<div class="card"><div class="klabel">Sugestão forte</div><div class="kval" style="color:'+(quaseCertos>0?'var(--primary)':'')+'">'+quaseCertos+'</div><div class="khint">acima de 90% de semelhança</div></div>'
+  ].join('');
+
+  var lista=linhas.filter(function(x){
+    if(q && norm(x.p.nome).indexOf(q)<0 && String(x.p.cod||'').indexOf(q)<0) return false;
+    if(f==='pendentes') return x.fonte==='pendente';
+    if(f==='ligados')   return x.fonte==='manual';
+    if(f==='auto')      return x.fonte==='auto';
+    if(f==='ignorados') return x.fonte==='ignorado';
+    return true;
+  });
+  lista.sort(function(a,b){
+    var sa=(a.sug[0]?a.sug[0].s:-1), sb=(b.sug[0]?b.sug[0].s:-1);
+    if(sa!==sb) return sb-sa;
+    return norm(a.p.nome)<norm(b.p.nome)?-1:1;
+  });
+
+  var html='<thead><tr><th>Cód</th><th>Produto (Produlog)</th><th>Situação</th><th>Produto no ERP (Protheus)</th><th class="r">Preço</th><th class="r">Vol/mês</th></tr></thead><tbody>';
+  if(!lista.length) html+='<tr><td colspan="6" class="empty">Nada aqui. '+(nPend===0?'Todos os produtos estão ligados. ✓':'')+'</td></tr>';
+  lista.slice(0,300).forEach(function(x){
+    var chave=chaveProduto(x.p);
+    var pill=x.fonte==='auto'?'<span class="pill p-ok">nome</span>'
+           :x.fonte==='manual'?'<span class="pill p-ok">ligado</span>'
+           :x.fonte==='ignorado'?'<span class="pill p-mut">ignorado</span>'
+           :'<span class="pill p-warn">sem par</span>';
+    var sel;
+    if(x.fonte==='ignorado'){
+      sel='<button class="btn btn-sm btn-ghost" onclick="ligarERP(\''+esc(chave)+'\',\'\')">Reativar</button>';
+    } else if(x.fonte==='auto'){
+      sel='<span style="font-size:12.5px">'+esc(x.c.nome)+'</span>';
+    } else {
+      var opts='<option value="">— escolher —</option>';
+      if(x.fonte==='manual' && x.c) opts+='<option value="'+esc(x.c.id)+'" selected>'+esc(x.c.nome)+'</option>';
+      var jaTem=(x.fonte==='manual'&&x.c)?x.c.id:null;
+      (x.fonte==='manual'?sugestoes(x.p,8):x.sug).forEach(function(s){
+        if(s.c.id===jaTem) return;
+        opts+='<option value="'+esc(s.c.id)+'">'+esc(s.c.nome)+' — '+Math.round(s.s*100)+'%'+(s.usado?' (já usado)':'')+'</option>';
+      });
+      opts+='<optgroup label="Todos os produtos do ERP">'+
+        comercial.slice().sort(function(a,b){ return String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'); })
+          .map(function(c){ return '<option value="'+esc(c.id)+'">'+esc(c.nome)+'</option>'; }).join('')+'</optgroup>';
+      sel='<div style="display:flex;gap:6px;align-items:center">'+
+          '<select onchange="ligarERP(\''+esc(chave)+'\',this.value)" '+(podeEditar?'':'disabled')+' style="min-width:230px">'+opts+'</select>'+
+          (x.fonte==='pendente'?'<button class="btn btn-sm btn-ghost" title="Este produto não é vendido — parar de cobrar" onclick="ligarERP(\''+esc(chave)+'\',\''+IGNORAR+'\')">✕</button>':'')+
+          '</div>';
+    }
+    html+='<tr>'+
+      '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(x.p.cod||'—')+'</td>'+
+      '<td><div class="nm">'+esc(x.p.nome||'—')+'</div></td>'+
+      '<td>'+pill+'</td>'+
+      '<td>'+sel+'</td>'+
+      '<td class="r num">'+(x.c?fmtR$(num(x.c.precoMedio3m)>0?x.c.precoMedio3m:x.c.precoMedio,2):'—')+'</td>'+
+      '<td class="r num">'+(x.c?fmtN(volumeMes(x.c),0):'—')+'</td></tr>';
+  });
+  document.getElementById('tbl-conc').innerHTML=html+'</tbody>';
+}
+window.ligarERP=function(chave, erpId){
+  if(!podeEditar){ alert('Sem permissão para editar.'); return; }
+  var p=null;
+  for(var i=0;i<produtos.length;i++){ if(chaveProduto(produtos[i])===chave){ p=produtos[i]; break; } }
+  if(!p) return;
+  setDoc(doc(dbC,'custosProduto',chave), {
+    cod:(p.cod!=null?String(p.cod):''), nome:p.nome||'',
+    erpChave:erpId||'', atualizadoEm:agora(), atualizadoPor:sessaoEmail
+  }, { merge:true })
+    .catch(function(e){ console.error('ligarERP:',e); alert('Erro ao salvar: '+(e.code||e.message)); });
+};
+window.conciliarAuto=function(){
+  if(!podeEditar){ alert('Sem permissão para editar.'); return; }
+  var alvos=[];
+  produtos.forEach(function(p){
+    if(fonteVinculo(p)!=='pendente') return;
+    var s=sugestoes(p,1)[0];
+    if(s && s.s>=0.9 && !s.usado) alvos.push({ p:p, s:s });
+  });
+  if(!alvos.length){ alert('Nenhuma sugestão acima de 90% para aplicar.\n\nAs que sobraram precisam de conferência na mão.'); return; }
+  var msg='Ligar '+alvos.length+' produto(s) automaticamente?\n\n'+
+    alvos.slice(0,15).map(function(a){ return '· '+a.p.nome+'\n    → '+a.s.c.nome+'  ('+Math.round(a.s.s*100)+'%)'; }).join('\n')+
+    (alvos.length>15?'\n\n... e mais '+(alvos.length-15):'')+
+    '\n\nDá para desfazer depois, trocando na tela.';
+  if(!confirm(msg)) return;
+  var ts=agora(), ok=0, erros=0;
+  var fila=alvos.map(function(a){
+    return setDoc(doc(dbC,'custosProduto',chaveProduto(a.p)), {
+      cod:(a.p.cod!=null?String(a.p.cod):''), nome:a.p.nome||'',
+      erpChave:a.s.c.id, atualizadoEm:ts, atualizadoPor:sessaoEmail
+    }, { merge:true }).then(function(){ ok++; }).catch(function(e){ erros++; console.error('conciliarAuto:',e); });
+  });
+  Promise.all(fila).then(function(){
+    alert('✅ '+ok+' produto(s) ligado(s)'+(erros?'\n'+erros+' falha(s)':''));
+  });
+};
+
 /* ---- SIMULAÇÃO ---- */
 function renderSim(){
   // seletor de cenários
@@ -2293,7 +2490,8 @@ var TABS={
   receitas:{ tbl:'tbl-receitas', cols:function(){ return COLS_RECEITAS; }, busca:'rc-busca', abrir:function(k){ var q=k.split('|'); abrirReceita(q[0],q[1]); } },
   mp:      { tbl:'tbl-mp',       cols:function(){ return COLS_MP; },       busca:'mp-busca', abrir:function(k){ abrirMP(k); } },
   emb:     { tbl:'tbl-emb',      cols:function(){ return COLS_EMB; },      busca:'eb-busca', abrir:function(k){ abrirEmb(k); } },
-  detalhe: { tbl:'tbl-detalhe',  cols:function(){ return COLS_DET; },      busca:'dt-busca', abrir:function(k){ abrirProduto(k); } }
+  detalhe: { tbl:'tbl-detalhe',  cols:function(){ return COLS_DET; },      busca:'dt-busca', abrir:function(k){ abrirProduto(k); } },
+  conc:    { tbl:'tbl-conc',     cols:function(){ return []; },            busca:'cc-busca', abrir:function(k){ abrirProduto(k); } }
 };
 // Colunas editáveis direto na célula. Só onde o Custos é dono do dado (Comodato):
 // ficha técnica e preço de compra vêm do Produlog e não se editam aqui.
