@@ -340,6 +340,16 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
           <option value="sempreco">Sem preço de venda</option>
           <option value="incompleto">Ficha incompleta</option>
         </select>
+        <select id="pn-ativo" onchange="render()">
+          <option value="ativos" selected>Só ativos</option>
+          <option value="inativos">Só inativos</option>
+          <option value="">Ativos e inativos</option>
+        </select>
+        <select id="pn-setor" onchange="render()">
+          <option value="">Confeitaria e Quadra</option>
+          <option value="conf">Só Confeitaria</option>
+          <option value="quadra">Só Quadra</option>
+        </select>
         <select id="pn-classe" onchange="render()"><option value="">Todas as classes</option></select>
       </div>
       <div class="tw"><div class="tscroll"><table id="tbl-prod"></table></div></div>
@@ -397,7 +407,8 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
           <div class="filtro-pop" id="dtFiltroPop">
             <div class="filtro-topo">
               <span id="dtFiltroResumo">Nenhum filtro</span>
-              <button type="button" onclick="limparFiltros()">Limpar tudo</button>
+              <button type="button" onclick="limparFiltros()">Voltar ao padrão</button>
+              <button type="button" onclick="limparTudoMesmo()" style="color:var(--muted);margin-left:10px">Tirar todos</button>
             </div>
             <div class="filtro-corpo" id="dtFiltroCorpo"></div>
           </div>
@@ -590,19 +601,21 @@ const authProd = getAuth(appProd);
 
 /* ============ ESTADO ============ */
 var pagina='painel', sessaoEmail='', currentRole=null, currentAtivo=false, podeEditar=false;
-var mps=[], comprasMP=[], massas=[], recheios=[], produtos=[], embalagens=[];
+var mps=[], comprasMP=[], massas=[], recheios=[], embalagens=[];
+var produtosConf=[], quadraProdutos=[], quadraKits=[];
+var produtos=[];   // Confeitaria + Quadra, já normalizados
 var cfgMP={}, cfgProduto={}, cfgEmb={}, cenarios=[], comercial=[];
 var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20, janelaMeses:3 };
 var simAtual={ id:null, nome:'Cenário sem título', ajustes:{}, globalPct:0, vendaPct:0 };
 var subs={};
 var errosLeitura={};   // colecao -> code, para o aviso dizer o motivo certo
 var ord={
-  painel:   { col:'margemPct', dir:1  },
+  painel:   { col:'cod',       dir:1  },   // abre ordenado por código
   produtos: { col:'nome',      dir:1  },
   receitas: { col:'custoKg',   dir:-1 },
   mp:       { col:'uso',       dir:-1 },
   emb:      { col:'uso',       dir:-1 },
-  detalhe:  { col:'nome',      dir:1  }
+  detalhe:  { col:'cod',       dir:1  }    // abre ordenado por código
 };
 var ultimaCarga=null;
 // Base de exibição dos valores. 'pct' = por pacote (padrão: é como se vende e
@@ -730,6 +743,39 @@ function precoMP(codigo, sim){
   var g=num(sim.globalPct);
   if(g) return base.preco*(1+g/100);
   return base.preco;
+}
+
+/* ============ PRODUTOS: Confeitaria + Quadra ============ */
+// A Quadra guarda um 'kit' (a receita inteira) e o peso do pacote em kg.
+// Aqui ela é traduzida para o mesmo formato da Confeitaria, para que todo o
+// resto do app — custo, margem, detalhe, simulação — funcione sem saber a origem.
+function montarProdutos(){
+  var out=[];
+  produtosConf.forEach(function(p){
+    var c=Object.assign({}, p); c.origem='conf'; out.push(c);
+  });
+  quadraProdutos.forEach(function(q){
+    var qtd=num(q.qtdPct), kgP=num(q.kgPacote);
+    var somaGr=num(q.grMassa)+num(q.grRecheio)+num(q.grRecheio2);
+    // peso da unidade: kg do pacote dividido pelas unidades; se faltar, a soma das gramaturas
+    var pesoUnG=(kgP>0&&qtd>0)?(kgP*1000/qtd):somaGr;
+    out.push({
+      firestoreId:q.firestoreId,
+      cod:q.cod||'', nome:q.nome||'',
+      classe:q.classe||'Quadra',
+      origem:'quadra',
+      pesoPct:(kgP>0?kgP*1000:(pesoUnG*qtd)),
+      qtdPct:qtd,
+      // o kit é a receita completa: entra como componente único
+      tipoMassa:q.kit||'', grMassa:pesoUnG,
+      tipoRecheio:'', grRecheio:0, tipoRecheio2:'', grRecheio2:0,
+      embalagemCod:q.embalagemCod||'', embalagemQtd:q.embalagemQtd||0,
+      kitNome:q.kit||'',
+      grMassaOriginal:num(q.grMassa), grRecheioOriginal:num(q.grRecheio), grRecheio2Original:num(q.grRecheio2)
+    });
+  });
+  produtos=out;
+  indexarReceitas();
 }
 
 /* ============ VENDA REAL (ERP) ============ */
@@ -870,6 +916,16 @@ function indexarReceitas(){
   receitaIdx={};
   massas.forEach(function(r){ if(r.nome) receitaIdx['M|'+norm(r.nome)]=r; });
   recheios.forEach(function(r){ if(r.nome) receitaIdx['R|'+norm(r.nome)]=r; });
+  // kits da Quadra: mesma estrutura de uma massa (ingredientes + totalKg)
+  quadraKits.forEach(function(k){
+    if(!k.nome) return;
+    var chave='M|'+norm(k.nome);
+    if(!receitaIdx[chave]) receitaIdx[chave]={
+      firestoreId:k.firestoreId, codigo:k.codigo||'', nome:k.nome,
+      ingredientes:k.ingredientes||[],
+      rendimentoKg:num(k.totalKg), rendimentoReal:0, _kit:true
+    };
+  });
 }
 function achaReceita(nome, tipo){
   if(!nome) return null;
@@ -897,7 +953,12 @@ function custoReceita(rec, sim){
 }
 
 /* ============ CUSTO DE PRODUTO ============ */
-function chaveProduto(p){ return (p.cod!=null && String(p.cod).trim()!=='') ? String(p.cod).trim() : ('fid_'+p.firestoreId); }
+function chaveProduto(p){
+  var base=(p.cod!=null && String(p.cod).trim()!=='') ? String(p.cod).trim() : ('fid_'+p.firestoreId);
+  // Quadra ganha prefixo: os códigos podem repetir entre os dois cadastros e
+  // as chaves da Confeitaria já estão gravadas em custosProduto.
+  return p.origem==='quadra' ? ('q'+base) : base;
+}
 function custoProduto(p, sim){
   var extra=cfgProduto[chaveProduto(p)]||{};
   var comps=[], custoMP=0, faltantes=[], fichaIncompleta=false;
@@ -938,7 +999,7 @@ function custoProduto(p, sim){
     custoMP+=c;
     comps.push({ rotulo:rotulo, nome:nome, gramas:g, custoKg:custoKg, custo:c, rec:rec, semGr:semGr, tipo:tipo });
   }
-  addComp(p.tipoMassa,'massa',p.grMassa,'Massa');
+  addComp(p.tipoMassa,'massa',p.grMassa, p.origem==='quadra'?'Kit':'Massa');
   addComp(p.tipoRecheio,'recheio',p.grRecheio,'Recheio 1');
   addComp(p.tipoRecheio2,'recheio',p.grRecheio2,'Recheio 2');
 
@@ -1095,7 +1156,8 @@ function diagnosticos(){
     });
   }
 
-  var todos=todosCustos(null);
+  // produto marcado como inativo não gera pendência
+  var todos=todosCustos(null).filter(function(c){ return (c.extra||{}).ativo!==false; });
   var semPreco=0, incompletos=0, negativos=0, abaixo=0;
   todos.forEach(function(c){
     if(!c.temPreco) semPreco++;   // já considera o preço do ERP como preenchido
@@ -1200,8 +1262,9 @@ function preencherClasses(){
 }
 
 var COLS_PAINEL=[
-  { k:'cod',        l:'Cód',            v:function(c){ return String(c.p.cod||''); } },
+  { k:'cod',        l:'Cód',            v:function(c){ return String(c.p.cod||'\uffff'); } },   // sem código: por último
   { k:'nome',       l:'Produto',        v:function(c){ return norm(c.p.nome); } },
+  { k:'setor',      l:'Setor',          v:function(c){ return c.p.origem==='quadra'?'Quadra':'Confeitaria'; } },
   { k:'classe',     l:'Classe',         v:function(c){ return norm(c.p.classe); } },
   { k:'custoUn',    l:'Custo',  lf:function(){ return 'Custo/'+sufBase(); }, r:1,
     v:function(c){ return c.custoUn>0?emBase(c,c.custoUn):null; } },
@@ -1247,7 +1310,18 @@ var COLS_MP=[
 /* ---- PAINEL ---- */
 function renderPainel(){
   preencherClasses();
-  var todos=todosCustos(null);
+  var stKpi=document.getElementById('pn-setor').value;
+  var atKpi=document.getElementById('pn-ativo').value;
+  // Os KPIs seguem os filtros estruturais (setor e situação): produto
+  // descontinuado não deve puxar a margem média. Busca, classe e margem são
+  // filtros de navegação e não mexem nos cartões.
+  var todos=todosCustos(null).filter(function(c){
+    var ehAtivo=((c.extra||{}).ativo!==false);
+    if(atKpi==='ativos' && !ehAtivo) return false;
+    if(atKpi==='inativos' && ehAtivo) return false;
+    if(stKpi && (c.p.origem||'conf')!==stKpi) return false;
+    return true;
+  });
   var comPreco=todos.filter(function(c){ return c.temPreco && !c.fichaIncompleta; });
   var semPreco=todos.filter(function(c){ return !c.temPreco; }).length;
   var incompletos=todos.filter(function(c){ return c.fichaIncompleta; }).length;
@@ -1281,6 +1355,9 @@ function renderPainel(){
     { l:'Lucro estimado / mês', v:temVolume?fmtR$k(lucroMes):'—',
       h:temVolume?('sobre '+fmtR$k(receitaMes)+' de receita'):'depende do volume do ERP',
       c:temVolume?(lucroMes<0?'var(--red)':'var(--green)'):'' },
+    { l:'Produtos no recorte', v:String(todos.length),
+      h:(atKpi==='ativos'?'só ativos':(atKpi==='inativos'?'só inativos':'ativos e inativos'))+
+        (stKpi==='conf'?' · Confeitaria':(stKpi==='quadra'?' · Quadra':'')) },
     { l:'Meta de margem', v:fmtPct(cfg.margemAlvoPct), h:'definida em Configurações' },
     { l:'Abaixo da meta', v:String(abaixo), h:'entre 0% e '+fmtPct(cfg.margemAlvoPct), c:abaixo>0?'var(--amber)':'' },
     { l:'Margem negativa', v:String(negativos), h:'preço não cobre o custo', c:negativos>0?'var(--red)':'' },
@@ -1313,6 +1390,7 @@ function renderPainel(){
     html+='<tr class="clickrow" data-k="'+esc(chaveProduto(c.p))+'" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
       '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
+      '<td><span class="pill '+(c.p.origem==='quadra'?'p-mut':'p-mut')+'">'+(c.p.origem==='quadra'?'Quadra':'Conf')+'</span></td>'+
       '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
       '<td class="r num">'+(c.custoUn>0?(emBase(c,c.custoUn)!=null?fmtR$(emBase(c,c.custoUn),casasBase()):'—'):'—')+(c.fichaIncompleta?' <span class="pill p-warn">?</span>':'')+'</td>'+
       '<td class="r num">'+(c.custoKg?fmtR$(c.custoKg):'—')+'</td>'+
@@ -1395,7 +1473,7 @@ function renderProdutos(){
   ordenarPor(todos, 'produtos', cols);
 
   var html=thead('produtos', cols)+'<tbody>';
-  if(!todos.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhum produto. Confirme se o Produlog tem produtos cadastrados em <span class="mono">produtosConfeitaria</span>.</td></tr>';
+  if(!todos.length) html+='<tr><td colspan="'+cols.length+'" class="empty">Nenhum produto. Confirme se o Produlog tem produtos em <span class="mono">produtosConfeitaria</span> ou <span class="mono">quadraProdutosCustom</span>.</td></tr>';
   todos.forEach(function(c){
     var ficha=c.comps.map(function(x){
       var tag='';
@@ -1408,7 +1486,7 @@ function renderProdutos(){
     html+='<tr class="clickrow" data-k="'+esc(chaveProduto(c.p))+'" onclick="abrirProduto(\''+esc(chaveProduto(c.p))+'\')">'+
       '<td class="mono" style="font-size:11.5px;color:var(--muted)">'+esc(c.p.cod||'—')+'</td>'+
       '<td><div class="nm">'+esc(c.p.nome||'—')+'</div></td>'+
-      '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+'</td>'+
+      '<td style="font-size:11.5px;color:var(--muted)">'+esc(c.p.classe||'—')+(c.p.origem==='quadra'?' <span class="pill p-mut">Quadra</span>':'')+'</td>'+
       '<td style="white-space:normal;max-width:330px;font-size:12px">'+ficha+'</td>'+
       '<td class="r num">'+(c.pesoUnG>0?fmtN(c.pesoUnG,1)+'g':'—')+'</td>'+
       '<td class="r num">'+(c.qtdPct>0?fmtN(c.qtdPct,0):'—')+'</td>'+
@@ -1525,7 +1603,8 @@ function linhasDetalhe(){
 var COLS_DET=[
   { g:1, k:'nome',    l:'Produto',       stk:1, v:function(x){ return norm(x.p.nome); } },
   { g:1, k:'ativo',   l:'Ativo',                v:function(x){ return x.ativo?'Sim':'Não'; } },
-  { g:1, k:'cod',     l:'ID',                   v:function(x){ return String(x.p.cod||''); } },
+  { g:1, k:'setor',   l:'Setor',                v:function(x){ return x.p.origem==='quadra'?'Quadra':'Confeitaria'; } },
+  { g:1, k:'cod',     l:'ID',                   v:function(x){ return String(x.p.cod||'\uffff'); } },   // sem código: por último
   { g:1, k:'marca',   l:'Marca',                v:function(x){ return x.marca; } },
   { g:1, k:'pesoPct', l:'Peso Pct (gr)',   r:1, v:function(x){ return x.pesoPct>0?x.pesoPct:null; } },
   { g:1, k:'qtdCad',  l:'Un/Pct',          r:1, v:function(x){ return x.qtdCad>0?x.qtdCad:null; } },
@@ -1553,12 +1632,17 @@ var COLS_DET=[
   { g:5, k:'custoKg', l:'Custo (R$/kg)',   r:1, v:function(x){ return x.custoKg; } }
 ];
 /* Filtros combináveis: dentro do grupo é OU, entre grupos é E. */
-var fDet={ situacao:[], problema:[], classe:[], massa:[], recheio:[] };
+// Começa filtrado em Ativo e nas marcas Mc / Receitaria.
+var fDet={ situacao:['ativo'], setor:[], marca:[], problema:[], classe:[], massa:[], recheio:[] };
+var MARCAS_PADRAO=['MC','RECEITARIA'];   // comparadas sem caixa e sem acento
+var _fdetInit=false;
 var GRUPOS_DET=[
   { k:'situacao', l:'Situação' },
+  { k:'setor',    l:'Setor' },
+  { k:'marca',    l:'Marca' },
   { k:'problema', l:'Problemas' },
   { k:'classe',   l:'Classe' },
-  { k:'massa',    l:'Massa' },
+  { k:'massa',    l:'Massa · Kit' },
   { k:'recheio',  l:'Recheio' }
 ];
 var PROBLEMAS=[
@@ -1571,6 +1655,8 @@ var PROBLEMAS=[
 ];
 function valoresGrupo(g, x){
   if(g==='situacao') return [x.ativo?'ativo':'inativo'];
+  if(g==='setor')    return [x.p.origem==='quadra'?'quadra':'conf'];
+  if(g==='marca')    return [x.marca||'(sem marca)'];
   if(g==='classe')   return x.p.classe?[x.p.classe]:[];
   if(g==='massa')    return x.m?[x.m.nome]:[];
   if(g==='recheio'){
@@ -1597,11 +1683,22 @@ function passaFiltros(x, ignorar){
 }
 function rotuloOpcao(g,v){
   if(g==='situacao') return v==='ativo'?'Ativo':'Inativo';
+  if(g==='setor')    return v==='quadra'?'Quadra':'Confeitaria';
   if(g==='problema'){ var p=PROBLEMAS.filter(function(x){ return x.v===v; })[0]; return p?p.l:v; }
   return v;
 }
+function marcasPadraoExistentes(todas){
+  var achadas=[];
+  todas.forEach(function(x){
+    var m=x.marca||'';
+    if(m && MARCAS_PADRAO.indexOf(normSemAcento(m))>=0 && achadas.indexOf(m)<0) achadas.push(m);
+  });
+  return achadas;
+}
 function montarPainelFiltros(todas){
   var corpo=document.getElementById('dtFiltroCorpo'); if(!corpo) return;
+  // na primeira carga com dados, marca Mc e Receitaria conforme existirem
+  if(!_fdetInit && todas.length){ _fdetInit=true; fDet.marca=marcasPadraoExistentes(todas); }
   var html='';
   GRUPOS_DET.forEach(function(G){
     // contagem considerando os OUTROS grupos: mostra o efeito real de marcar a opção
@@ -1611,6 +1708,7 @@ function montarPainelFiltros(todas){
     var chaves;
     if(G.k==='problema') chaves=PROBLEMAS.map(function(p){ return p.v; }).filter(function(v){ return cont[v]; });
     else if(G.k==='situacao') chaves=['ativo','inativo'].filter(function(v){ return cont[v]; });
+    else if(G.k==='setor') chaves=['conf','quadra'].filter(function(v){ return cont[v]; });
     else chaves=Object.keys(cont).sort(function(a,b){ return String(a).localeCompare(String(b),'pt-BR'); });
     // opções já marcadas continuam visíveis mesmo com contagem zero
     fDet[G.k].forEach(function(v){ if(chaves.indexOf(v)<0) chaves.push(v); });
@@ -1660,6 +1758,12 @@ window.tirarFiltro=function(g,v){
   if(i>=0){ arr.splice(i,1); render(); }
 };
 window.limparFiltros=function(){
+  GRUPOS_DET.forEach(function(G){ fDet[G.k]=[]; });
+  fDet.situacao=['ativo'];
+  fDet.marca=marcasPadraoExistentes(linhasDetalhe());
+  render();
+};
+window.limparTudoMesmo=function(){
   GRUPOS_DET.forEach(function(G){ fDet[G.k]=[]; });
   render();
 };
@@ -1728,6 +1832,7 @@ function renderDetalhe(){
     html+='<tr class="clickrow" data-k="'+esc(chaveProduto(x.p))+'" onclick="abrirProduto(\''+esc(chaveProduto(x.p))+'\')">'+
       '<td class="stk"><div class="nm">'+esc(x.p.nome||'\u2014')+'</div></td>'+
       '<td>'+(x.ativo?'Sim':'<span class="mut">N\u00e3o</span>')+'</td>'+
+      '<td style="font-size:11.5px" class="mut">'+(x.p.origem==='quadra'?'Quadra':'Conf')+'</td>'+
       '<td class="mono mut">'+esc(x.p.cod||'\u2014')+'</td>'+
       '<td>'+txt(x.marca)+'</td>'+
       '<td class="r num">'+gr(x.pesoPct)+'</td>'+
@@ -2619,7 +2724,8 @@ function ligarProdulog(){
   });
 
   ouvir('massasList', collection(dbProd,'massasList'), function(s){
-    massas=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
+    massas=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); });
+    indexarReceitas(); render();
   });
 
   ouvir('recheiosList', collection(dbProd,'recheiosList'), function(s){
@@ -2627,7 +2733,18 @@ function ligarProdulog(){
   });
 
   ouvir('produtosConfeitaria', collection(dbProd,'produtosConfeitaria'), function(s){
-    produtos=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); }); render();
+    produtosConf=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); });
+    montarProdutos(); render();
+  });
+
+  ouvir('quadraProdutosCustom', collection(dbProd,'quadraProdutosCustom'), function(s){
+    quadraProdutos=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); });
+    montarProdutos(); render();
+  });
+
+  ouvir('quadraKitsCustom', collection(dbProd,'quadraKitsCustom'), function(s){
+    quadraKits=s.docs.map(function(x){ return Object.assign({ firestoreId:x.id }, x.data()); });
+    montarProdutos(); render();
   });
 
   ouvir('embalagens', collection(dbProd,'embalagens'), function(s){
