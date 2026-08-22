@@ -757,15 +757,28 @@ function montarProdutos(){
   quadraProdutos.forEach(function(q){
     var qtd=num(q.qtdPct), kgP=num(q.kgPacote);
     var somaGr=num(q.grMassa)+num(q.grRecheio)+num(q.grRecheio2);
-    // peso da unidade: kg do pacote dividido pelas unidades; se faltar, a soma das gramaturas
-    var pesoUnG=(kgP>0&&qtd>0)?(kgP*1000/qtd):somaGr;
+    // Peso da unidade e unidades por pacote. Na Quadra muita coisa é vendida a
+    // peso (pão francês em pacote de 8 kg), então "unidades por pacote" e
+    // gramatura costumam estar em branco — e não fazem falta para o custo:
+    // basta o peso do pacote e o custo/kg do kit.
+    var pesoUnG, qtdUn;
+    if(kgP>0 && qtd>0){         // pacote com unidades contadas
+      pesoUnG=kgP*1000/qtd; qtdUn=qtd;
+    } else if(kgP>0){           // vendido a peso: o pacote é a própria unidade
+      pesoUnG=kgP*1000; qtdUn=1;
+    } else if(somaGr>0){        // sem peso de pacote, mas com gramatura
+      pesoUnG=somaGr; qtdUn=(qtd>0?qtd:1);
+    } else {                    // sem nada: aí sim a ficha está incompleta
+      pesoUnG=0; qtdUn=(qtd>0?qtd:1);
+    }
     out.push({
       firestoreId:q.firestoreId,
       cod:q.cod||'', nome:q.nome||'',
       classe:q.classe||'Quadra',
       origem:'quadra',
-      pesoPct:(kgP>0?kgP*1000:(pesoUnG*qtd)),
-      qtdPct:qtd,
+      pesoPct:(kgP>0?kgP*1000:(pesoUnG*qtdUn)),
+      qtdPct:qtdUn,
+      aPeso:(kgP>0 && !(qtd>0)),   // pacote vendido a peso
       // o kit é a receita completa: entra como componente único
       tipoMassa:q.kit||'', grMassa:pesoUnG,
       tipoRecheio:'', grRecheio:0, tipoRecheio2:'', grRecheio2:0,
@@ -999,7 +1012,7 @@ function custoProduto(p, sim){
     custoMP+=c;
     comps.push({ rotulo:rotulo, nome:nome, gramas:g, custoKg:custoKg, custo:c, rec:rec, semGr:semGr, tipo:tipo });
   }
-  addComp(p.tipoMassa,'massa',p.grMassa, p.origem==='quadra'?'Kit':'Massa');
+  addComp(p.tipoMassa,'massa',p.grMassa, p.origem==='quadra'?(p.aPeso?'Kit (pacote)':'Kit'):'Massa');
   addComp(p.tipoRecheio,'recheio',p.grRecheio,'Recheio 1');
   addComp(p.tipoRecheio2,'recheio',p.grRecheio2,'Recheio 2');
 
@@ -1477,6 +1490,7 @@ function renderProdutos(){
   todos.forEach(function(c){
     var ficha=c.comps.map(function(x){
       var tag='';
+      if(c.p.aPeso && x.rotulo==='Kit (pacote)') tag=' <span class="pill p-mut" title="Vendido a peso: o pacote é a unidade">a peso</span>';
       if(x.tipo==='mp') tag=' <span class="pill p-mut" title="Matéria-prima usada direto como recheio, sem receita própria">MP</span>';
       else if(x.tipo==='?') tag=' <span class="pill p-bad" title="Não existe receita nem matéria-prima com este nome">não encontrado</span>';
       return esc(x.nome)+tag+(x.semGr
@@ -1582,7 +1596,8 @@ function linhasDetalhe(){
     var somaGr=0; c.comps.forEach(function(x){ somaGr+=x.gramas; });
     var pesoPct=num(p.pesoPct), qtdCad=num(p.qtdPct);
     var qtdCalc=(pesoPct>0&&somaGr>0)?(pesoPct/somaGr):null;
-    var diverg=(qtdCalc!=null&&qtdCad>0)?Math.abs(qtdCalc/qtdCad-1)*100:null;
+    // produto vendido a peso não tem contagem de unidades: não há o que divergir
+    var diverg=(!p.aPeso && qtdCalc!=null && qtdCad>0)?Math.abs(qtdCalc/qtdCad-1)*100:null;
     var totRech=(r1?r1.custo:0)+(r2?r2.custo:0);
     var custoMPun=(m?m.custo:0)+totRech;      // sem perda: espelha a planilha
     var pesoUnKg=somaGr>0?somaGr/1000:(c.pesoUnKg||0);
