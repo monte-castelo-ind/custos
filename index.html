@@ -297,6 +297,7 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
     <button class="navbtn admin-only" data-p="quadra" onclick="nav('quadra')"><span class="side-ico">▤</span><span class="lbl">Detalhar · Quadra</span></button>
     <button class="navbtn admin-only" data-p="conc" onclick="nav('conc')"><span class="side-ico">⇆</span><span class="lbl">Conciliar ERP</span></button>
     <button class="navbtn" data-p="sim" onclick="nav('sim')"><span class="side-ico">⇄</span><span class="lbl">Simulação</span></button>
+    <button class="navbtn" data-p="folha" onclick="nav('folha')"><span class="side-ico">☷</span><span class="lbl">Folha</span></button>
     <button class="navbtn" data-p="config" onclick="nav('config')"><span class="side-ico">⚙</span><span class="lbl">Configurações</span></button>
     <div class="side-foot">
       <div class="uline">
@@ -484,6 +485,38 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
       <div class="tw"><div class="tscroll"><table id="tbl-conc"></table></div></div>
     </div>
 
+    <!-- FOLHA -->
+    <div class="page" id="page-folha">
+      <div class="alert a-info">☷ Custo de pessoal por centro de custo, lido do <strong>Extrato Mensal</strong> que a contabilidade manda em PDF. Envie o arquivo abaixo: o app lê aqui mesmo, confere os totais contra o próprio documento e só grava se fechar.</div>
+
+      <div class="card admin-mov" style="margin-bottom:14px">
+        <div class="klabel">Enviar o PDF do mês</div>
+        <div class="fhint" style="margin:6px 0 11px">Arquivo original da contabilidade, sem precisar abrir nem converter. O nome não importa — a competência é lida de dentro do PDF.</div>
+        <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+          <label class="btn btn-sm" style="cursor:pointer">↑ Escolher PDF<input type="file" id="fl-file" accept=".pdf" style="display:none" onchange="folhaLerPDF(this)"></label>
+          <div><label style="font-size:11px;color:var(--muted);font-weight:600">Dias úteis do mês</label>
+            <input type="number" id="fl-dias" value="21" min="1" max="31" style="width:90px" /></div>
+          <div id="fl-status" style="font-size:12.5px;color:var(--muted);flex:1;min-width:200px"></div>
+        </div>
+        <div id="fl-previa" style="margin-top:13px"></div>
+      </div>
+
+      <div class="tools">
+        <select id="fl-comp" onchange="folhaSel=this.value; render();"></select>
+        <select id="fl-vis" onchange="render()">
+          <option value="matriz">Matriz por centro de custo</option>
+          <option value="resumo">Resumo por centro de custo</option>
+        </select>
+        <button class="btn btn-sm btn-ghost" onclick="folhaExportar()" style="margin-left:auto">⤓ Exportar CSV</button>
+      </div>
+      <div class="grid kpis" id="fl-kpis"></div>
+      <div class="tw" style="margin-top:13px"><div class="tscroll"><table class="tdet" id="tbl-folha"></table></div></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:9px;line-height:1.6">
+        <strong>TOTAL</strong> = proventos + FGTS empresa, o que a empresa desembolsa no centro de custo. O INSS patronal não vem detalhado por centro no relatório, então não entra aqui.
+        Nada de nome, CPF ou salário individual é guardado — só o agregado por centro de custo.
+      </div>
+    </div>
+
     <!-- SIMULAÇÃO -->
     <div class="page" id="page-sim">
       <div class="card" style="margin-bottom:14px">
@@ -632,6 +665,7 @@ var mps=[], comprasMP=[], massas=[], recheios=[], embalagens=[];
 var produtosConf=[], quadraProdutos=[], quadraKits=[];
 var produtos=[];   // Confeitaria + Quadra, já normalizados
 var cfgMP={}, cfgProduto={}, cfgEmb={}, cenarios=[], comercial=[];
+var folhas=[], folhaSel='';   // folhaMensal/{YYYY-MM} lida do PDF da contabilidade
 var cfg={ fonte:'menor', perdaPct:0, moMes:0, fixoMes:0, producaoKgMes:0, impostosPct:0, comissaoPct:0, fretePct:0, margemAlvoPct:20, janelaMeses:3 };
 var simAtual={ id:null, nome:'Cenário sem título', ajustes:{}, globalPct:0, vendaPct:0 };
 var subs={};
@@ -642,6 +676,7 @@ var ord={
   receitas: { col:'custoKg',   dir:-1 },
   mp:       { col:'uso',       dir:-1 },
   emb:      { col:'uso',       dir:-1 },
+  folha:    { col:'rubrica',   dir:1  },
   detalhe:  { col:'cod',       dir:1  },   // abre ordenado por código
   quadra:   { col:'cod',       dir:1  }
 };
@@ -671,7 +706,7 @@ window.trocarBase=function(b){
   render();
 };
 
-const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], emb:['Embalagens','Valor unitário e uso nos produtos'], detalhe:['Detalhar Custo · Confeitaria','Massa, recheios e embalagem por produto'], quadra:['Detalhar Custo · Quadra','Kit, peso e embalagem por produto'], conc:['Conciliar ERP','Ligar produto do Produlog ao nome do Protheus'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
+const TITLES={ painel:['Painel','Visão de custo e margem'], produtos:['Produtos','Ficha, preço de venda e complementos'], receitas:['Receitas','Custo por kg de massas e recheios'], mp:['Matérias-primas','Preço vigente e override manual'], emb:['Embalagens','Valor unitário e uso nos produtos'], detalhe:['Detalhar Custo · Confeitaria','Massa, recheios e embalagem por produto'], quadra:['Detalhar Custo · Quadra','Kit, peso e embalagem por produto'], conc:['Conciliar ERP','Ligar produto do Produlog ao nome do Protheus'], folha:['Folha','Custo de pessoal por centro de custo'], sim:['Simulação','Cenários de preço de matéria-prima'], config:['Configurações','Parâmetros do cálculo de custo'] };
 
 /* ============ UTIL ============ */
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -1298,6 +1333,7 @@ function render(){
   else if(pagina==='receitas') renderReceitas();
   else if(pagina==='mp') renderMP();
   else if(pagina==='emb') renderEmb();
+  else if(pagina==='folha') renderFolha();
   else if(pagina==='sim') renderSim();
   else if(pagina==='detalhe') renderDetalhe();
   else if(pagina==='quadra') renderQuadra();
@@ -2389,6 +2425,559 @@ window.conciliarAuto=function(){
   });
 };
 
+/* ===================================================================
+   Leitor do EXTRATO MENSAL da folha (relatório Domínio) no navegador.
+
+   O parser em Python depende de `pdftotext -layout`, que devolve o texto
+   com as colunas preservadas. O pdf.js entrega pedaços de texto com
+   coordenadas, então a primeira etapa aqui é RECONSTRUIR essa grade:
+   agrupar por linha (y) e converter distância horizontal em espaços.
+   Sem isso o resto não funciona, porque o parse se apoia em "duas ou
+   mais espaços" para separar descrição de referência.
+
+   Validado contra o mesmo PDF do parser Python: 179 registros,
+   proventos 605.289,39, líquido 266.378,44, zero divergências.
+   =================================================================== */
+
+// ---------- reconstrução do layout ----------
+// Largura média de caractere na fonte do relatório (Tahoma 6pt no PDF).
+// Serve para transformar distância em número de espaços.
+function montarLinhas(itens, larguraChar, tolerancia) {
+  tolerancia = tolerancia || 3;
+  var linhas = [];
+  // Agrupar por y arredondado NÃO funciona: rótulos da mesma linha visual
+  // diferem em fração de ponto e caem em faixas diferentes — foi assim que
+  // "Informativa:" saiu numa linha separada e os totais deixaram de casar.
+  // Aqui os itens são ordenados por y e agrupados por proximidade real.
+  var todos = [];
+  itens.forEach(function (it) {
+    if (!it.str) return;
+    todos.push({ x: it.transform[4], y: it.transform[5], s: it.str, w: it.width || 0 });
+  });
+  todos.sort(function (a, b) { return b.y - a.y; });
+
+  var grupos = [];
+  var atual = null;
+  todos.forEach(function (p) {
+    if (!atual || Math.abs(atual.y - p.y) > tolerancia) {
+      atual = { y: p.y, itens: [] };
+      grupos.push(atual);
+    }
+    atual.itens.push(p);
+  });
+
+  grupos.forEach(function (g) {
+      var pedacos = g.itens.sort(function (a, b) { return a.x - b.x; });
+      var linha = "";
+      var fim = 0;      // x onde terminou o pedaço anterior
+      pedacos.forEach(function (p, i) {
+        if (i === 0) {
+          var col = Math.round(p.x / larguraChar);
+          linha = " ".repeat(Math.max(0, col)) + p.s;
+        } else {
+          var faltam = Math.round((p.x - fim) / larguraChar);
+          linha += " ".repeat(Math.max(faltam, faltam > 0 ? faltam : 1)) + p.s;
+        }
+        // itens de espaço trazem largura enorme e estragam a conta do próximo
+        // deslocamento; para eles vale a largura nominal do texto.
+        var larg = (p.s.trim() === "") ? p.s.length * larguraChar : (p.w || p.s.length * larguraChar);
+        fim = p.x + larg;
+      });
+      linhas.push(linha.replace(/\s+$/, ""));
+  });
+  return linhas;
+}
+
+// ---------- helpers numéricos ----------
+function numBR(s) {
+  if (s == null) return 0;
+  s = String(s).trim().replace(/\./g, "").replace(",", ".");
+  if (!s || s === "-" || s === "--") return 0;
+  var n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+function horasDec(s) {
+  if (!s) return 0;
+  s = String(s).trim();
+  if (s.indexOf(":") >= 0) {
+    var p = s.split(":");
+    var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (!isFinite(h) || !isFinite(m)) return 0;
+    return Math.round((h + m / 60) * 10000) / 10000;
+  }
+  return numBR(s);
+}
+function ehHora(s) { return !!s && String(s).indexOf(":") >= 0; }
+
+// ---------- expressões do layout (espelham o parser Python) ----------
+var RE_COMPET = /Compet[eê]ncia:\s*(\d{2}\/\d{4})/;
+var RE_EMPRESA = /Empresa:\s*(\d+)\s*-\s*(.+?)\s{2,}/;
+var RE_CCUSTO = /^C\.Custo:\s*(\d+)\s*-\s*(.+?)\s*$/;
+var RE_EMPR = /^(Empr|Contr)\.?:\s*(\d+)\s+(.+?)\s*Situa[cç][aã]o:\s*(.+?)\s{2,}CPF:\s*([\d.\-]+)\s+Adm:\s*(\d{2}\/\d{2}\/\d{4})?/;
+var RE_VINC = /^V[ií]nculo:\s*(.+?)\s{2,}CC:\s*(\d+)\s+Depto:\s*(\d+)\s+Horas M[eê]s:\s*([\d.,]*)/;
+var RE_CARGO = /^Cargo:\s*(\d+)\s+(.+?)\s{2,}C\.B\.O:\s*(\S+)\s+Filial:\s*(\d+)\s+Sal[aá]rio:\s*([\d.,]+)/;
+var RE_TOT1 = /^ND:\s*(\d+)\s+Proventos:\s*([\d.,]+)\s+Descontos:\s*([\d.,]+)\s+Informativa:\s*([\d.,]+)\s+Informativa Dedutora:\s*([\d.,]+)\s+L[ií]quido:\s*([\d.,]+)/;
+var RE_TOT2 = /^NF:\s*(\d+)\s+Base INSS:\s*([\d.,]+)\s+Excedente INSS:\s*([\d.,]+)\s+Base FGTS:\s*([\d.,]+)\s+Valor FGTS:\s*([\d.,]+)\s+Base IRRF:\s*([\d.,]+)/;
+
+var RE_MARCA = /(?:^|\s)([PD])(?=\s|$)/g;
+var RE_ITEM = /^\s*(\d{1,5})\s+(.+?)\s+([\d.,]+|\d+:\d{2})\s+([\d.,]+)\s*$/;
+var RE_SO_DESC = /^\s*(\d{1,5})\s+([A-ZÀ-Ú][A-ZÀ-Úa-zà-ú0-9º°.,%/()\s\-]{6,})\s*$/;
+var RE_SO_VAL = /^\s*([\d.,]+|\d+:\d{2})\s+([\d.]+,\d{2})\s*$/;
+var RE_COLADO = /^\s*(\d{1,5})\s+(.+?)([\d.]+,\d{2})\s*$/;
+
+// Os P/D são CANDIDATOS a fronteira entre as colunas, não fronteiras certas:
+// existe descrição terminando em "15 D" (15 dias). Se o pedaço não casa como
+// verba completa, o marcador é ignorado e o próximo recebe um pedaço maior.
+function verbasDaLinha(ln, pendente) {
+  var itens = [];
+  var ini = 0;
+  var m;
+  RE_MARCA.lastIndex = 0;
+  while ((m = RE_MARCA.exec(ln)) !== null) {
+    var posMarca = m.index + m[0].indexOf(m[1]);
+    var pedaco = ln.slice(ini, posMarca);
+    var fimMarca = posMarca + 1;
+
+    var mi = pedaco.match(RE_ITEM);
+    if (mi) {
+      var desc = mi[2].replace(/\s{2,}/g, " ").trim();
+      if (desc) {
+        ini = fimMarca;
+        itens.push({ cod: mi[1], desc: desc, ref: mi[3], val: mi[4], tipo: m[1] });
+        continue;
+      }
+    }
+    var mv = pedaco.match(RE_SO_VAL);
+    if (mv && pendente) {
+      ini = fimMarca;
+      itens.push({ cod: pendente.cod, desc: pendente.desc, ref: mv[1], val: mv[2], tipo: m[1] });
+      pendente = null;
+      continue;
+    }
+    var mc = pedaco.match(RE_COLADO);
+    if (mc) {
+      var d2 = mc[2].replace(/\s{2,}/g, " ").trim();
+      if (d2) {
+        ini = fimMarca;
+        itens.push({ cod: mc[1], desc: d2, ref: "", val: mc[3], tipo: m[1] });
+        continue;
+      }
+    }
+  }
+  var md = ln.match(RE_SO_DESC);
+  if (md) pendente = { cod: md[1], desc: md[2].replace(/\s{2,}/g, " ").trim() };
+  return { itens: itens, pendente: pendente };
+}
+
+// ---------- rubricas (mesma tabela do Python) ----------
+var RUBRICAS = [
+  ["Salário", "P", ["DIAS NORMAIS", "PRO-LABORE", "SALARIO SUBSTITU", "DIAS JUSTIFICADOS", "ESTOURO DO MES"]],
+  ["DSR HE", "P", ["REFLEXO HORAS EXTRAS DSR", "DSR HORAS EXTRAS"]],
+  ["DSR", "P", ["DSR", "REFLEXO HORAS ADIC"]],
+  ["Comissões", "P", ["COMISSO", "COMISSA"]],
+  ["Adicional noturno", "P", ["ADICIONAL NOTURNO", "ADIC. NOTURNO", "ADIC NOTURNO"]],
+  ["Insalubridade", "P", ["INSALUB"]],
+  ["Periculosidade", "P", ["PERICULOSIDADE"]],
+  ["Quinquênio", "P", ["QUINQUENIO"]],
+  ["Gratificação", "P", ["GRATIFICA"]],
+  ["Abono", "P", ["ABONO"]],
+  ["HE 50%", "P", ["HORAS EXTRAS 50"]],
+  ["HE 100%", "P", ["HORAS EXTRAS 100"]],
+  ["Sobreaviso", "P", ["SOBRE AVISO", "SOBREAVISO"]],
+  ["Férias", "P", ["FERIAS", "FÉRIAS"]],
+  ["Saldo salário Rescisões", "P", ["SALDO DE SALARIO"]],
+  ["Rescisões", "P", ["RESCISAO", "AVISO PREVIO", "INDENIZAD", "13 SALARIO", "13O", "13o"]],
+  ["Atestados", "P", ["AFAST", "DOENCA", "DOENÇA", "APOSENT"]],
+  ["Salário Família", "P", ["SALARIO FAMILIA"]],
+  ["Outros proventos", "P", []],
+  ["Faltas não justificadas", "D", ["FALTA"]],
+  ["Rescisões (desconto)", "D", ["LIQUIDO RESCISAO", "RESCISAO"]],
+  ["Adiantamentos", "D", ["ADIANT"]],
+  ["Crédito do trabalhador", "D", ["CRED. TRAB", "CRED TRAB", "EMPRESTIMO", "EMP. CRED"]],
+  ["INSS Funcionários", "D", ["I.N.S.S", "INSS"]],
+  ["IRRF", "D", ["IMPOSTO DE RENDA", "I.R.R.F", "IRRF"]],
+  ["Vale transporte", "D", ["VALE TRANSP"]],
+  ["Vale refeição", "D", ["VALE REFEI"]],
+  ["Plano de saúde", "D", ["PLANO DE SA"]],
+  ["Pensão alimentícia", "D", ["PENSAO"]],
+  ["Dias afastados", "D", ["DIAS AFASTADOS", "AFAST"]],
+  ["Outros descontos", "D", []]
+];
+function rubricaDe(desc, tipo) {
+  var d = String(desc || "").toUpperCase();
+  for (var i = 0; i < RUBRICAS.length; i++) {
+    var r = RUBRICAS[i];
+    if (r[1] !== tipo || !r[2].length) continue;
+    for (var j = 0; j < r[2].length; j++) if (d.indexOf(r[2][j]) >= 0) return r[0];
+  }
+  return tipo === "P" ? "Outros proventos" : "Outros descontos";
+}
+
+// ---------- parse ----------
+function lerFolhaDeLinhas(linhas) {
+  var txt = linhas.join("\n");
+  var competencia = (txt.match(RE_COMPET) || [])[1] || "";
+  var mE = txt.match(RE_EMPRESA);
+  var empresa = mE ? mE[2].trim() : "";
+
+  var funcs = [], atual = null, pendente = null, ccusto = ["", ""];
+
+  linhas.forEach(function (ln) {
+    if (!ln.trim()) return;
+    var s = ln.trim();
+
+    // Cada centro de custo termina com "Resumo por Rubricas do Centro de Custo",
+    // que REPETE todas as verbas. Somar isso triplicava as horas extras.
+    if (/^Resumo por Rubricas|^Resumo Geral|^Totais do Centro de Custo|^Resumo das Rubricas/.test(s)) {
+      atual = null; return;
+    }
+    var m = s.match(RE_CCUSTO);
+    if (m) { ccusto = [m[1], m[2].trim()]; return; }
+
+    m = s.match(RE_EMPR);
+    if (m) {
+      atual = {
+        competencia: competencia, empresa: empresa,
+        ccusto_cod: ccusto[0], ccusto: ccusto[1],
+        tipo_registro: m[1] === "Contr" ? "contribuinte" : "empregado",
+        matricula: m[2], nome: m[3].trim(), situacao: m[4].trim(),
+        cpf: m[5], admissao: m[6] || "",
+        vinculo: "", cargo: "", horas_mes: 0, salario: 0,
+        proventos: 0, descontos: 0, liquido: 0,
+        base_inss: 0, base_fgts: 0, valor_fgts: 0, base_irrf: 0,
+        he_horas: 0, he_valor: 0, verbas: []
+      };
+      funcs.push(atual);
+      pendente = null;
+      return;
+    }
+    if (!atual) return;
+
+    m = s.match(RE_VINC);
+    if (m) { atual.vinculo = m[1].trim(); atual.horas_mes = numBR(m[4]); return; }
+    m = s.match(RE_CARGO);
+    if (m) { atual.cargo = m[2].trim(); atual.salario = numBR(m[5]); return; }
+    m = s.match(RE_TOT1);
+    if (m) {
+      atual.proventos = numBR(m[2]); atual.descontos = numBR(m[3]);
+      atual.liquido = numBR(m[6]); return;
+    }
+    m = s.match(RE_TOT2);
+    if (m) {
+      atual.base_inss = numBR(m[2]); atual.base_fgts = numBR(m[4]);
+      atual.valor_fgts = numBR(m[5]); atual.base_irrf = numBR(m[6]); return;
+    }
+
+    var r = verbasDaLinha(ln, pendente);
+    pendente = r.pendente;
+    r.itens.forEach(function (v) {
+      var valor = numBR(v.val);
+      var classe = rubricaDe(v.desc, v.tipo);
+      atual.verbas.push({
+        codigo: v.cod, descricao: v.desc, referencia: v.ref,
+        horas: ehHora(v.ref) ? horasDec(v.ref) : 0,
+        valor: valor, tipo: v.tipo, rubrica: classe
+      });
+      if (v.tipo === "P" && classe.indexOf("HE ") === 0) {
+        atual.he_valor += valor;
+        if (ehHora(v.ref)) atual.he_horas += horasDec(v.ref);
+      }
+    });
+  });
+
+  return { competencia: competencia, empresa: empresa, funcionarios: funcs };
+}
+
+// ---------- agregação por centro de custo ----------
+function agregarCentros(dados, diasUteis) {
+  diasUteis = diasUteis > 0 ? diasUteis : 21;
+  var centros = {};
+  dados.funcionarios.forEach(function (f) {
+    var nome = f.ccusto || "(sem centro)";
+    var c = centros[nome] || (centros[nome] = {
+      nome: nome, pessoas: 0, salarios: 0, proventos: 0, descontos: 0,
+      liquido: 0, he_horas: 0, he_valor: 0, fgts: 0, rubricas: {}
+    });
+    c.pessoas++;
+    c.salarios += f.salario;
+    c.proventos += f.proventos;
+    c.descontos += f.descontos;
+    c.liquido += f.liquido;
+    c.he_horas += f.he_horas;
+    c.he_valor += f.he_valor;
+    c.fgts += f.valor_fgts;
+    f.verbas.forEach(function (v) {
+      c.rubricas[v.rubrica] = (c.rubricas[v.rubrica] || 0) + v.valor;
+    });
+  });
+  Object.keys(centros).forEach(function (k) {
+    var c = centros[k];
+    var custo = c.fgts;
+    RUBRICAS.forEach(function (r) {
+      if (r[1] === "P" && c.rubricas[r[0]]) custo += c.rubricas[r[0]];
+    });
+    c.rubricas["FGTS empresa"] = c.fgts;
+    c.custo_total = custo;
+    c.por_dia_util = custo / diasUteis;
+  });
+  return centros;
+}
+
+function conferir(dados) {
+  var ruins = [];
+  dados.funcionarios.forEach(function (f) {
+    var esperado = Math.round((f.proventos - f.descontos) * 100) / 100;
+    if (Math.abs(esperado - f.liquido) > 0.02) ruins.push(f.nome);
+    var sp = 0, sd = 0;
+    f.verbas.forEach(function (v) { if (v.tipo === "P") sp += v.valor; else sd += v.valor; });
+    if (Math.abs(sp - f.proventos) > 0.02 || Math.abs(sd - f.descontos) > 0.02) {
+      if (ruins.indexOf(f.nome) < 0) ruins.push(f.nome);
+    }
+  });
+  return ruins;
+}
+
+
+/* ---- FOLHA: leitura do PDF no navegador e gravação ---- */
+var _pdfjs=null;
+function carregarPdfJs(){
+  if(_pdfjs) return Promise.resolve(_pdfjs);
+  var base='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379';
+  return import(base+'/build/pdf.min.mjs').then(function(lib){
+    lib.GlobalWorkerOptions.workerSrc=base+'/build/pdf.worker.min.mjs';
+    _pdfjs=lib;
+    return lib;
+  });
+}
+var _folhaPrevia=null;
+window.folhaLerPDF=function(input){
+  var file=input.files&&input.files[0]; if(!file) return;
+  if(!podeEditar){ alert('Sem permissão para enviar a folha.'); input.value=''; return; }
+  var st=document.getElementById('fl-status');
+  var pv=document.getElementById('fl-previa');
+  st.textContent='Carregando o leitor de PDF…'; pv.innerHTML='';
+  carregarPdfJs()
+    .then(function(lib){
+      st.textContent='Lendo o arquivo…';
+      return file.arrayBuffer().then(function(buf){
+        return lib.getDocument({ data:new Uint8Array(buf), useSystemFonts:true }).promise;
+      });
+    })
+    .then(function(doc){
+      st.textContent='Extraindo '+doc.numPages+' páginas…';
+      // largura média de caractere: converte distância horizontal em espaços
+      return doc.getPage(1).then(function(p1){ return p1.getTextContent(); }).then(function(tc){
+        var sw=0, sc=0;
+        tc.items.forEach(function(it){ if(it.str&&it.width){ sw+=it.width; sc+=it.str.length; } });
+        var lc=(sc>0? sw/sc : 6);
+        var linhas=[];
+        var seq=Promise.resolve();
+        for(var p=1;p<=doc.numPages;p++){
+          (function(n){
+            seq=seq.then(function(){
+              return doc.getPage(n).then(function(pg){ return pg.getTextContent(); })
+                .then(function(t){ linhas=linhas.concat(montarLinhas(t.items, lc)); });
+            });
+          })(p);
+        }
+        return seq.then(function(){ return linhas; });
+      });
+    })
+    .then(function(linhas){
+      var dados=lerFolhaDeLinhas(linhas);
+      if(!dados.competencia || !dados.funcionarios.length){
+        st.textContent='';
+        pv.innerHTML='<div class="alert a-warn" style="margin:0">⚠ Não reconheci este PDF como o Extrato Mensal da folha. Confirme se é o relatório certo, sem senha e sem estar escaneado.</div>';
+        return;
+      }
+      var ruins=conferir(dados);
+      var soma=function(k){ var s=0; dados.funcionarios.forEach(function(f){ s+=f[k]; }); return s; };
+      var prov=soma('proventos'), desc=soma('descontos'), liq=soma('liquido');
+      var dias=num(document.getElementById('fl-dias').value)||21;
+      var centros=agregarCentros(dados,dias);
+      var p=dados.competencia.split('/');
+      var ym=p[1]+'-'+p[0];
+      _folhaPrevia={ ym:ym, dados:dados, centros:centros, dias:dias,
+                     prov:prov, desc:desc, liq:liq, ruins:ruins };
+      st.textContent='';
+      var jaTem=folhas.some(function(f){ return (f.periodo||f.id)===ym; });
+      pv.innerHTML=
+        '<div class="'+(ruins.length?'alert a-warn':'alert a-info')+'" style="margin:0 0 11px">'+
+          (ruins.length
+            ? '⚠ '+ruins.length+' registro(s) não fecharam a conferência. Não vou gravar — me mande o PDF que eu investigo.'
+            : '✓ Conferência OK: em todos os '+dados.funcionarios.length+' registros, proventos − descontos = líquido, e a soma das verbas bate com os totais do documento.')+
+        '</div>'+
+        '<div class="fgrid">'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Competência</div><div class="kval" style="font-size:19px">'+esc(dados.competencia)+'</div><div class="khint">'+esc(dados.empresa||'')+'</div></div>'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Registros</div><div class="kval" style="font-size:19px">'+dados.funcionarios.length+'</div><div class="khint">'+Object.keys(centros).length+' centros de custo</div></div>'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Proventos</div><div class="kval" style="font-size:19px">'+fmtR$k(prov)+'</div><div class="khint">líquido '+fmtR$k(liq)+'</div></div>'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Horas extras</div><div class="kval" style="font-size:19px">'+fmtN(soma('he_horas'),0)+' h</div><div class="khint">'+fmtR$k(soma('he_valor'))+'</div></div>'+
+        '</div>'+
+        (jaTem?'<div class="alert a-warn" style="margin:11px 0 0">⚠ Já existe folha gravada para '+esc(ym)+'. Gravar substitui os dados desse mês.</div>':'')+
+        '<div style="margin-top:13px;display:flex;gap:9px;flex-wrap:wrap">'+
+          (ruins.length?'':'<button class="btn btn-sm" onclick="folhaGravar()">Gravar '+esc(ym)+'</button>')+
+          '<button class="btn btn-sm btn-ghost" onclick="folhaCancelar()">Cancelar</button>'+
+        '</div>';
+    })
+    .catch(function(e){
+      console.error('folhaLerPDF:',e);
+      st.textContent='';
+      pv.innerHTML='<div class="alert a-warn" style="margin:0">⚠ Erro ao ler o PDF: '+esc(e.message||String(e))+'</div>';
+    })
+    .then(function(){ input.value=''; });
+};
+window.folhaCancelar=function(){
+  _folhaPrevia=null;
+  document.getElementById('fl-previa').innerHTML='';
+  document.getElementById('fl-status').textContent='';
+};
+window.folhaGravar=function(){
+  var P=_folhaPrevia; if(!P) return;
+  if(!podeEditar){ alert('Sem permissão.'); return; }
+  var fs=P.dados.funcionarios;
+  var soma=function(k){ var s=0; fs.forEach(function(f){ s+=f[k]; }); return s; };
+  var centros={};
+  Object.keys(P.centros).forEach(function(nome){
+    var c=P.centros[nome];
+    var k=normSemAcento(nome).replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'')||'SEM-CENTRO';
+    var rub={};
+    Object.keys(c.rubricas).forEach(function(r){ rub[r]=Math.round(c.rubricas[r]*100)/100; });
+    centros[k]={ nome:nome, pessoas:c.pessoas,
+      salarios:Math.round(c.salarios*100)/100, proventos:Math.round(c.proventos*100)/100,
+      descontos:Math.round(c.descontos*100)/100, liquido:Math.round(c.liquido*100)/100,
+      he_horas:Math.round(c.he_horas*100)/100, he_valor:Math.round(c.he_valor*100)/100,
+      fgts:Math.round(c.fgts*100)/100, custo_total:Math.round(c.custo_total*100)/100,
+      por_dia_util:Math.round(c.por_dia_util*100)/100, rubricas:rub };
+  });
+  // só o agregado por centro de custo: nome, CPF e salário individual não sobem
+  var doc_={ competencia:P.dados.competencia, periodo:P.ym, empresa:P.dados.empresa||'',
+    dias_uteis:P.dias, funcionarios:fs.length,
+    proventos:Math.round(P.prov*100)/100, descontos:Math.round(P.desc*100)/100,
+    liquido:Math.round(P.liq*100)/100, fgts:Math.round(soma('valor_fgts')*100)/100,
+    he_horas:Math.round(soma('he_horas')*100)/100, he_valor:Math.round(soma('he_valor')*100)/100,
+    centros:centros, origem:'app', atualizadoEm:agora(), atualizadoPor:sessaoEmail };
+  var st=document.getElementById('fl-status');
+  st.textContent='Gravando…';
+  setDoc(doc(dbC,'folhaMensal',P.ym), doc_, { merge:true })
+    .then(function(){
+      folhaSel=P.ym; _folhaPrevia=null;
+      document.getElementById('fl-previa').innerHTML='<div class="alert a-info" style="margin:0">✓ Folha de '+esc(P.ym)+' gravada.</div>';
+      st.textContent='';
+      render();
+    })
+    .catch(function(e){ console.error('folhaGravar:',e); st.textContent=''; alert('Erro ao gravar: '+(e.code||e.message)); });
+};
+
+function folhaAtual(){
+  for(var i=0;i<folhas.length;i++){ if((folhas[i].periodo||folhas[i].id)===folhaSel) return folhas[i]; }
+  return folhas[0]||null;
+}
+function renderFolha(){
+  var sel=document.getElementById('fl-comp');
+  if(sel){
+    var mk=folhas.map(function(f){ return (f.periodo||f.id); }).join('|');
+    if(sel.dataset.mk!==mk){
+      sel.innerHTML=folhas.length
+        ? folhas.map(function(f){ var p=(f.periodo||f.id); return '<option value="'+esc(p)+'">'+esc(f.competencia||p)+'</option>'; }).join('')
+        : '<option value="">nenhuma folha enviada</option>';
+      sel.dataset.mk=mk;
+    }
+    if(folhaSel) sel.value=folhaSel;
+  }
+  var F=folhaAtual();
+  var kp=document.getElementById('fl-kpis');
+  var tb=document.getElementById('tbl-folha');
+  if(!F){
+    kp.innerHTML='';
+    tb.innerHTML='<tbody><tr><td class="empty">Nenhuma folha enviada ainda. Use o botão acima para mandar o PDF da contabilidade.</td></tr></tbody>';
+    return;
+  }
+  var centros=F.centros||{};
+  var chaves=Object.keys(centros).sort(function(a,b){ return centros[b].proventos-centros[a].proventos; });
+  var custoTotal=0, hev=0, heh=0;
+  chaves.forEach(function(k){ custoTotal+=num(centros[k].custo_total); hev+=num(centros[k].he_valor); heh+=num(centros[k].he_horas); });
+
+  kp.innerHTML=[
+    '<div class="card"><div class="klabel">Competência</div><div class="kval">'+esc(F.competencia||F.periodo)+'</div><div class="khint">'+num(F.funcionarios)+' registros · '+chaves.length+' centros</div></div>',
+    '<div class="card"><div class="klabel">Custo de pessoal</div><div class="kval">'+fmtR$k(custoTotal)+'</div><div class="khint">proventos + FGTS</div></div>',
+    '<div class="card"><div class="klabel">Líquido pago</div><div class="kval">'+fmtR$k(num(F.liquido))+'</div><div class="khint">proventos '+fmtR$k(num(F.proventos))+'</div></div>',
+    '<div class="card"><div class="klabel">Horas extras</div><div class="kval" style="color:'+(hev>0?'var(--amber)':'')+'">'+fmtN(heh,0)+' h</div><div class="khint">'+fmtR$k(hev)+' · '+(custoTotal>0?fmtPct(hev/custoTotal*100):'—')+' do custo</div></div>',
+    '<div class="card"><div class="klabel">Por dia útil</div><div class="kval">'+fmtR$k(custoTotal/(num(F.dias_uteis)||21))+'</div><div class="khint">'+(num(F.dias_uteis)||21)+' dias úteis</div></div>'
+  ].join('');
+
+  var vis=document.getElementById('fl-vis').value;
+  if(vis==='resumo'){
+    var html='<thead><tr><th class="stk">Centro de custo</th><th class="r">Pessoas</th><th class="r">Proventos</th><th class="r">FGTS</th><th class="r">Custo total</th><th class="r">HE (h)</th><th class="r">HE (R$)</th><th class="r">Por dia útil</th><th class="r">Custo médio/pessoa</th></tr></thead><tbody>';
+    chaves.forEach(function(k){
+      var c=centros[k];
+      html+='<tr><td class="stk">'+esc(c.nome)+'</td>'+
+        '<td class="r num">'+num(c.pessoas)+'</td>'+
+        '<td class="r num">'+fmtR$(num(c.proventos),2)+'</td>'+
+        '<td class="r num">'+fmtR$(num(c.fgts),2)+'</td>'+
+        '<td class="r num" style="font-weight:600">'+fmtR$(num(c.custo_total),2)+'</td>'+
+        '<td class="r num">'+fmtN(num(c.he_horas),1)+'</td>'+
+        '<td class="r num">'+fmtR$(num(c.he_valor),2)+'</td>'+
+        '<td class="r num">'+fmtR$(num(c.por_dia_util),2)+'</td>'+
+        '<td class="r num">'+(num(c.pessoas)>0?fmtR$(num(c.custo_total)/num(c.pessoas),2):'—')+'</td></tr>';
+    });
+    tb.innerHTML=html+'</tbody>';
+    return;
+  }
+
+  // matriz rubrica x centro de custo
+  var rubs=[];
+  RUBRICAS.forEach(function(r){ rubs.push(r[0]); });
+  rubs.push('FGTS empresa');
+  var presentes=rubs.filter(function(r){
+    return chaves.some(function(k){ return num((centros[k].rubricas||{})[r])!==0; });
+  });
+  var h2='<thead><tr><th class="stk">Rubrica</th>'+
+    chaves.map(function(k){ return '<th class="r">'+esc(centros[k].nome)+'</th>'; }).join('')+
+    '<th class="r">TOTAL</th></tr></thead><tbody>';
+  h2+='<tr style="background:var(--card-2)"><td class="stk" style="font-weight:600">Funcionários</td>'+
+    chaves.map(function(k){ return '<td class="r num">'+num(centros[k].pessoas)+'</td>'; }).join('')+
+    '<td class="r num" style="font-weight:600">'+num(F.funcionarios)+'</td></tr>';
+  presentes.forEach(function(r){
+    var soma=0;
+    var tds=chaves.map(function(k){
+      var v=num((centros[k].rubricas||{})[r]);
+      soma+=v;
+      return '<td class="r num"'+(v===0?' style="color:var(--muted)"':'')+'>'+(v?fmtN(v,2):'–')+'</td>';
+    }).join('');
+    h2+='<tr><td class="stk">'+esc(r)+'</td>'+tds+'<td class="r num" style="font-weight:600">'+fmtN(soma,2)+'</td></tr>';
+  });
+  h2+='<tr style="background:var(--card-2)"><td class="stk" style="font-weight:700">TOTAL (proventos + FGTS)</td>'+
+    chaves.map(function(k){ return '<td class="r num" style="font-weight:700">'+fmtN(num(centros[k].custo_total),2)+'</td>'; }).join('')+
+    '<td class="r num" style="font-weight:700">'+fmtN(custoTotal,2)+'</td></tr>';
+  h2+='<tr style="background:var(--card-2)"><td class="stk" style="font-weight:600">Por dia útil</td>'+
+    chaves.map(function(k){ return '<td class="r num">'+fmtN(num(centros[k].por_dia_util),2)+'</td>'; }).join('')+
+    '<td class="r num" style="font-weight:600">'+fmtN(custoTotal/(num(F.dias_uteis)||21),2)+'</td></tr>';
+  tb.innerHTML=h2+'</tbody>';
+}
+window.folhaExportar=function(){
+  var F=folhaAtual(); if(!F){ alert('Nenhuma folha para exportar.'); return; }
+  var centros=F.centros||{};
+  var chaves=Object.keys(centros).sort(function(a,b){ return centros[b].proventos-centros[a].proventos; });
+  var rubs=[]; RUBRICAS.forEach(function(r){ rubs.push(r[0]); }); rubs.push('FGTS empresa');
+  var linhas=[['Competência',F.competencia||F.periodo,'Dias úteis',num(F.dias_uteis)||21].join(';')];
+  linhas.push(['Rubrica'].concat(chaves.map(function(k){ return centros[k].nome; })).concat(['TOTAL']).join(';'));
+  linhas.push(['Funcionários'].concat(chaves.map(function(k){ return num(centros[k].pessoas); })).concat([num(F.funcionarios)]).join(';'));
+  var br=function(v){ return String(Math.round(v*100)/100).replace('.',','); };
+  rubs.forEach(function(r){
+    var s=0, cols=chaves.map(function(k){ var v=num((centros[k].rubricas||{})[r]); s+=v; return br(v); });
+    if(s!==0) linhas.push([r].concat(cols).concat([br(s)]).join(';'));
+  });
+  var tot=0; chaves.forEach(function(k){ tot+=num(centros[k].custo_total); });
+  linhas.push(['TOTAL (proventos + FGTS)'].concat(chaves.map(function(k){ return br(num(centros[k].custo_total)); })).concat([br(tot)]).join(';'));
+  var d=num(F.dias_uteis)||21;
+  linhas.push(['Por dia útil'].concat(chaves.map(function(k){ return br(num(centros[k].por_dia_util)); })).concat([br(tot/d)]).join(';'));
+  var blob=new Blob(['\ufeff'+linhas.join('\n')],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='folha-centro-custo-'+(F.periodo||F.id)+'.csv';
+  a.click();
+};
+
 /* ---- SIMULAÇÃO ---- */
 function renderSim(){
   // seletor de cenários
@@ -2912,6 +3501,13 @@ function liberar(d){
   // Se um dia o Produlog ganhar Auth, o callback abaixo cobre o caso e a
   // função é idempotente (guardada por if(subs.mps) return).
   ligarProdulog();
+
+  ouvir('folhaMensal', collection(dbC,'folhaMensal'), function(s){
+    folhas=s.docs.map(function(x){ return Object.assign({ id:x.id }, x.data()); })
+      .sort(function(a,b){ return String(b.periodo||b.id).localeCompare(String(a.periodo||a.id)); });
+    if(!folhaSel && folhas.length) folhaSel=folhas[0].periodo||folhas[0].id;
+    render();
+  });
 
   ouvir('comercialProduto', collection(dbC,'comercialProduto'), function(s){
     comercial=s.docs.map(function(x){ return Object.assign({ id:x.id }, x.data()); });
