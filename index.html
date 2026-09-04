@@ -501,6 +501,16 @@ body.is-admin button.admin-only{display:inline-flex !important;align-items:cente
         <div id="fl-previa" style="margin-top:13px"></div>
       </div>
 
+      <div class="card folha-mov" style="margin-bottom:14px;border-left:3px solid var(--blue)">
+        <div class="klabel">Ficha de empregado &rarr; Excel</div>
+        <div class="fhint" style="margin:6px 0 11px">Outro relatório: o <strong>Registro de Empregado</strong> do Domínio, com os dados cadastrais. Sai uma planilha com setor, nome, cidade, CEP, nascimento, telefone, matrícula e CPF. <strong>Nada é gravado</strong> — o PDF é lido aqui e o arquivo baixa direto.</div>
+        <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+          <label class="btn btn-sm btn-ghost" style="cursor:pointer">&uarr; Escolher PDF da ficha<input type="file" id="fc-file" accept=".pdf" style="display:none" onchange="fichaLerPDF(this)"></label>
+          <div id="fc-status" style="font-size:12.5px;color:var(--muted);flex:1;min-width:180px"></div>
+        </div>
+        <div id="fc-previa" style="margin-top:12px"></div>
+      </div>
+
       <div class="tools">
         <select id="fl-comp" onchange="folhaSel=this.value; render();"></select>
         <select id="fl-vis" onchange="render()">
@@ -2976,6 +2986,337 @@ window.folhaExportar=function(){
   a.href=URL.createObjectURL(blob);
   a.download='folha-centro-custo-'+(F.periodo||F.id)+'.csv';
   a.click();
+};
+
+/* ===================================================================
+   Leitor da FICHA / REGISTRO DE EMPREGADO (relatório Domínio).
+
+   Diferente do Extrato Mensal, aqui cada campo tem RÓTULO acima ou ao
+   lado do valor. Então o parser procura pelo rótulo e pega o valor na
+   posição correspondente da linha seguinte — não depende de coluna fixa.
+
+   Um registro por página (a última página do registro traz o centro de
+   custo). O documento pode ter dezenas de registros seguidos.
+   =================================================================== */
+
+function fcNorm(s){ return String(s==null?'':s).replace(/\s+/g,' ').trim(); }
+function fcSlug(s){
+  return String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/\s+/g,' ').trim();
+}
+
+/* Pega o valor de um campo que fica ABAIXO do rótulo, alinhado pela
+   coluna onde o rótulo começa. É assim que o formulário é montado.   */
+function valorAbaixo(linhas, i, rotulo, larguraMax){
+  var alvo=fcSlug(rotulo);
+  var pos=fcSlug(linhas[i]).indexOf(alvo);
+  if(pos<0) return '';
+  // a coluna real no texto original (o slug pode ter tamanho diferente)
+  var col=linhas[i].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').indexOf(alvo);
+  if(col<0) col=pos;
+  for(var k=i+1;k<Math.min(i+3,linhas.length);k++){
+    var l=linhas[k];
+    if(!l || !l.trim()) continue;
+    // se a linha seguinte é outro rótulo, o campo está vazio
+    var ini=Math.max(0,col-2);
+    var fim=(larguraMax? ini+larguraMax : l.length);
+    var pedaco=fcNorm(l.slice(ini,fim));
+    if(pedaco) return pedaco;
+  }
+  return '';
+}
+
+/* Vários rótulos na MESMA linha: corta a linha de valores nos limites de
+   cada rótulo. Usado em "Data de nascimento | Local do nascimento | ..."  */
+function camposDaLinha(linhaRot, linhaVal, rotulos){
+  var base=linhaRot.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  var marcas=[];
+  rotulos.forEach(function(r){
+    var p=base.indexOf(fcSlug(r));
+    if(p>=0) marcas.push({ rot:r, pos:p });
+  });
+  marcas.sort(function(a,b){ return a.pos-b.pos; });
+  var out={};
+  marcas.forEach(function(m,idx){
+    var ini=Math.max(0, m.pos-2);
+    var fim=(idx+1<marcas.length) ? Math.max(ini, marcas[idx+1].pos-2) : linhaVal.length;
+    out[m.rot]=fcNorm((linhaVal||'').slice(ini,fim));
+  });
+  return out;
+}
+
+function soDigitos(s){ return String(s||'').replace(/\D/g,''); }
+function ehData(s){ return /^\d{2}\/\d{2}\/\d{4}$/.test(fcNorm(s)); }
+
+/* ---------- parse de um registro ---------- */
+function lerFicha(linhas){
+  var f={ numero:'', matricula:'', nome:'', cpf:'', nascimento:'', cidade:'', cep:'',
+          telResidencial:'', telCelular:'', cargo:'', funcao:'', cbo:'', admissao:'',
+          salario:'', setor:'', endereco:'', bairro:'', uf:'', rg:'', pis:'',
+          sexo:'', estadoCivil:'', instrucao:'', mae:'', localNascimento:'' };
+
+  for(var i=0;i<linhas.length;i++){
+    var l=linhas[i], s=fcSlug(l);
+
+    if(s.indexOf('registro de empregado')>=0){
+      var mN=l.match(/N[ºo°]?\s*:?\s*(\d{4,})/);
+      if(mN && !f.numero) f.numero=mN[1];
+    }
+    if(s.indexOf('matricula esocial')>=0 && !f.matricula){
+      var v=valorAbaixo(linhas,i,'Matrícula eSocial',30);
+      var mm=v.match(/(\d+)/);
+      if(mm) f.matricula=mm[1];
+      // o Nº do registro vem na mesma linha, mais à direita
+      if(!f.numero){
+        var prox=fcNorm(linhas[i+1]||'');
+        var todos=prox.match(/\d+/g)||[];
+        if(todos.length>1) f.numero=todos[todos.length-1];
+      }
+    }
+    // Empregado: o nome vem na linha seguinte
+    if(s==='empregado' || s.indexOf('empregado ')===0 && s.indexOf('beneficiarios')>0){
+      if(!f.nome){
+        var n=fcNorm(linhas[i+1]||'');
+        if(n && !/^resid/i.test(n)) f.nome=n;
+      }
+    }
+    if(s.indexOf('residencia')>=0 && !f.endereco){
+      // o endereço ocupa uma ou duas linhas e termina com "CEP: 00000-000"
+      var partes=[];
+      for(var k=i+1;k<Math.min(i+4,linhas.length);k++){
+        var lp=fcNorm(linhas[k]);
+        if(!lp) continue;
+        if(fcSlug(lp).indexOf('data de nascimento')>=0) break;
+        partes.push(lp);
+        if(/cep/i.test(lp)) break;
+      }
+      var end=partes.join(' ');
+      f.endereco=end;
+      var mc=end.match(/CEP\s*:?\s*(\d{5}-?\d{3})/i);
+      if(mc) f.cep=mc[1].replace(/(\d{5})-?(\d{3})/,'$1-$2');
+      // "Rua X, 565, BAIRRO A, BAIRRO B, CIDADE, UF, - CEP: ..."
+      var semCep=end.replace(/,?\s*-?\s*CEP\s*:?\s*\d{5}-?\d{3}.*$/i,'');
+      var camp=semCep.split(',').map(fcNorm).filter(Boolean);
+      if(camp.length>=2){
+        var ufc=camp[camp.length-1];
+        if(/^[A-Z]{2}$/.test(ufc)){ f.uf=ufc; f.cidade=camp[camp.length-2]; f.bairro=camp[camp.length-3]||''; }
+        else { f.cidade=ufc; f.bairro=camp[camp.length-2]||''; }
+      }
+    }
+    if(s.indexOf('data de nascimento')>=0 && !f.nascimento){
+      var c=camposDaLinha(l, linhas[i+1]||'',
+        ['Data de nascimento','Local do nascimento','País da nacionalidade','Estado civil']);
+      f.nascimento=c['Data de nascimento']||'';
+      f.localNascimento=c['Local do nascimento']||'';
+      f.estadoCivil=c['Estado civil']||'';
+    }
+    if(s.indexOf('cedula de identidade')>=0 && !f.rg){
+      var c2=camposDaLinha(l, linhas[i+1]||'',
+        ['Cédula de Identidade','Data de emissão','Órgão/UF emissor','Título Eleitoral']);
+      f.rg=soDigitos(c2['Cédula de Identidade']||'');
+    }
+    if(s.indexOf('cpf')>=0 && s.indexOf('ctps')>=0 && !f.cpf){
+      var c3=camposDaLinha(l, linhas[i+1]||'',
+        ['CTPS','Série','Data de expedição da CTPS','UF CTPS','CPF','Cart. Nac. Habilitação','Categoria']);
+      var cpf=soDigitos(c3['CPF']||'');
+      if(cpf.length===11) f.cpf=cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4');
+    }
+    if(s.indexOf('grau de instrucao')>=0 && !f.sexo){
+      var c4=camposDaLinha(l, linhas[i+1]||'',
+        ['Doc. militar','Categoria','Cor','Sexo','Grau de instrução']);
+      f.sexo=c4['Sexo']||'';
+      f.instrucao=c4['Grau de instrução']||'';
+    }
+    if(s.indexOf('telefone residencial')>=0 && !f.telResidencial && !f.telCelular){
+      var c5=camposDaLinha(l, linhas[i+1]||'',
+        ['Deficiência','Telefone Residencial','Telefone Celular']);
+      f.telResidencial=soDigitos(c5['Telefone Residencial']||'')?fcNorm(c5['Telefone Residencial']):'';
+      f.telCelular=soDigitos(c5['Telefone Celular']||'')?fcNorm(c5['Telefone Celular']):'';
+    }
+    if(s.indexOf('cargo')>=0 && s.indexOf('funcao')>=0 && !f.cargo){
+      var c6=camposDaLinha(l, linhas[i+1]||'', ['Cargo','Função','C.B.O.']);
+      f.cargo=c6['Cargo']||'';
+      f.funcao=c6['Função']||'';
+      f.cbo=soDigitos(c6['C.B.O.']||'');
+    }
+    if(s.indexOf('data de admissao')>=0 && !f.admissao){
+      var c7=camposDaLinha(l, linhas[i+1]||'',
+        ['Data de Admissão','Salário','Por','Horário de Trabalho','Horário de Intervalo']);
+      f.admissao=c7['Data de Admissão']||'';
+      var sal=(c7['Salário']||'').replace(/R\$\s*/,'');
+      var ms=sal.match(/[\d.]+,\d{2}/);
+      if(ms) f.salario=ms[0];
+    }
+    if(s.indexOf('sob n')>=0 && !f.pis){
+      var c8=camposDaLinha(l, linhas[i+1]||'', ['Cadastrado em','Sob nº','Domicílio bancário']);
+      f.pis=fcNorm(c8['Sob nº']||'');
+    }
+    if(s.indexOf('mae')>=0 && s.length<8 && !f.mae){
+      f.mae=fcNorm(linhas[i+1]||'');
+    }
+    // centro de custo: vem na última página do registro
+    if(s.indexOf('informacoes do centro de custo')>=0){
+      for(var j=i+1;j<Math.min(i+6,linhas.length);j++){
+        var mcc=(linhas[j]||'').match(/Nome\s*:\s*(.+)$/i);
+        if(mcc){ f.setor=fcNorm(mcc[1]); break; }
+      }
+    }
+  }
+  return f;
+}
+
+/* ---------- divide o documento em registros ---------- */
+function fatiarFichas(linhas){
+  var inicios=[];
+  linhas.forEach(function(l,i){
+    // a 1ª página de cada registro tem o título isolado; a 2ª tem "Nº:" junto
+    var s=fcSlug(l);
+    if(s.indexOf('registro de empregado')>=0 && s.indexOf('n:')<0 && s.indexOf('n :')<0){
+      // evita pegar a página de continuação, que tem "REGISTRO DE EMPREGADO  Nº: 000001"
+      if(!/N[ºo°]\s*:/.test(l)) inicios.push(i);
+    }
+  });
+  if(!inicios.length) return [];
+  var blocos=[];
+  for(var i=0;i<inicios.length;i++){
+    var ini=inicios[i];
+    var fim=(i+1<inicios.length)?inicios[i+1]:linhas.length;
+    blocos.push(linhas.slice(ini,fim));
+  }
+  return blocos;
+}
+
+function lerFichas(linhas){
+  return fatiarFichas(linhas).map(lerFicha).filter(function(f){ return f.nome; });
+}
+
+
+/* ---- FICHA DE EMPREGADO: PDF -> Excel ---- */
+window.fichaLerPDF=function(input){
+  var file=input.files&&input.files[0]; if(!file) return;
+  var st=document.getElementById('fc-status');
+  var pv=document.getElementById('fc-previa');
+  st.textContent='Carregando o leitor de PDF…'; pv.innerHTML='';
+  carregarPdfJs()
+    .then(function(lib){
+      st.textContent='Lendo o arquivo…';
+      return file.arrayBuffer().then(function(buf){
+        return lib.getDocument({ data:new Uint8Array(buf), useSystemFonts:true }).promise;
+      });
+    })
+    .then(function(doc){
+      st.textContent='Extraindo '+doc.numPages+' páginas…';
+      return doc.getPage(1).then(function(p1){ return p1.getTextContent(); }).then(function(tc){
+        var sw=0, sc=0;
+        tc.items.forEach(function(it){ if(it.str&&it.width){ sw+=it.width; sc+=it.str.length; } });
+        var lc=(sc>0? sw/sc : 6);
+        var linhas=[], seq=Promise.resolve();
+        for(var p=1;p<=doc.numPages;p++){
+          (function(n){
+            seq=seq.then(function(){
+              return doc.getPage(n).then(function(pg){ return pg.getTextContent(); })
+                .then(function(t){
+                  linhas=linhas.concat(montarLinhas(t.items, lc));
+                  if(n%20===0) st.textContent='Extraindo… página '+n+' de '+doc.numPages;
+                });
+            });
+          })(p);
+        }
+        return seq.then(function(){ return linhas; });
+      });
+    })
+    .then(function(linhas){
+      var fichas=lerFichas(linhas);
+      st.textContent='';
+      if(!fichas.length){
+        pv.innerHTML='<div class="alert a-warn" style="margin:0">⚠ Não reconheci este PDF como o Registro de Empregado. Confirme se é o relatório certo, com camada de texto (não escaneado).</div>';
+        return;
+      }
+      _fichas=fichas;
+      var semTel=fichas.filter(function(f){ return !f.telResidencial && !f.telCelular; }).length;
+      var semSetor=fichas.filter(function(f){ return !f.setor; }).length;
+      var semCpf=fichas.filter(function(f){ return !f.cpf; }).length;
+      var setores={}; fichas.forEach(function(f){ if(f.setor) setores[f.setor]=(setores[f.setor]||0)+1; });
+      pv.innerHTML=
+        '<div class="alert a-info" style="margin:0 0 11px">✓ '+fichas.length+' ficha(s) lida(s) · '+Object.keys(setores).length+' setor(es)</div>'+
+        '<div class="fgrid">'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Empregados</div><div class="kval" style="font-size:19px">'+fichas.length+'</div><div class="khint">no arquivo</div></div>'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Sem telefone</div><div class="kval" style="font-size:19px;color:'+(semTel?'var(--amber)':'var(--green)')+'">'+semTel+'</div><div class="khint">campo vazio na ficha</div></div>'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Sem setor</div><div class="kval" style="font-size:19px;color:'+(semSetor?'var(--amber)':'var(--green)')+'">'+semSetor+'</div><div class="khint">centro de custo ausente</div></div>'+
+          '<div class="card" style="box-shadow:none"><div class="klabel">Sem CPF</div><div class="kval" style="font-size:19px;color:'+(semCpf?'var(--red)':'var(--green)')+'">'+semCpf+'</div><div class="khint">confira se leu certo</div></div>'+
+        '</div>'+
+        (Object.keys(setores).length
+          ? '<div class="fhint" style="margin-top:9px">'+Object.keys(setores).sort().map(function(s){ return esc(s)+': '+setores[s]; }).join(' · ')+'</div>'
+          : '')+
+        '<div class="tw" style="margin-top:12px"><div class="tscroll" style="max-height:260px"><table class="tdet">'+
+        '<thead><tr><th class="stk">Nome</th><th>Setor</th><th>Matrícula</th><th>CPF</th><th>Nascimento</th><th>Cidade</th><th>CEP</th><th>Telefone</th></tr></thead><tbody>'+
+        fichas.slice(0,60).map(function(f){
+          return '<tr><td class="stk">'+esc(f.nome)+'</td>'+
+            '<td>'+esc(f.setor||'—')+'</td>'+
+            '<td class="mono">'+esc(f.matricula||'—')+'</td>'+
+            '<td class="mono">'+esc(f.cpf||'—')+'</td>'+
+            '<td class="num">'+esc(f.nascimento||'—')+'</td>'+
+            '<td>'+esc(f.cidade||'—')+'</td>'+
+            '<td class="mono">'+esc(f.cep||'—')+'</td>'+
+            '<td>'+esc(f.telCelular||f.telResidencial||'—')+'</td></tr>';
+        }).join('')+'</tbody></table></div></div>'+
+        (fichas.length>60?'<div class="fhint" style="margin-top:6px">Mostrando 60 de '+fichas.length+'. A planilha sai completa.</div>':'')+
+        '<div style="margin-top:12px;display:flex;gap:9px;flex-wrap:wrap">'+
+          '<button class="btn btn-sm" onclick="fichaExcel()">⤓ Baixar Excel</button>'+
+          '<button class="btn btn-sm btn-ghost" onclick="fichaExcel(1)">⤓ Excel completo (todos os campos)</button>'+
+          '<button class="btn btn-sm btn-ghost" onclick="fichaCancelar()">Cancelar</button>'+
+        '</div>';
+    })
+    .catch(function(e){
+      console.error('fichaLerPDF:',e);
+      st.textContent='';
+      pv.innerHTML='<div class="alert a-warn" style="margin:0">⚠ Erro ao ler o PDF: '+esc(e.message||String(e))+'</div>';
+    })
+    .then(function(){ input.value=''; });
+};
+var _fichas=[];
+window.fichaCancelar=function(){
+  _fichas=[];
+  document.getElementById('fc-previa').innerHTML='';
+  document.getElementById('fc-status').textContent='';
+};
+window.fichaExcel=function(completo){
+  if(!_fichas.length){ alert('Nenhuma ficha lida.'); return; }
+  carregarXLSX().then(function(){
+    var cols = completo
+      ? [['Setor','setor'],['Nome','nome'],['Matricula','matricula'],['CPF','cpf'],
+         ['Data de Nascimento','nascimento'],['Cidade','cidade'],['CEP','cep'],
+         ['Telefone Celular','telCelular'],['Telefone Residencial','telResidencial'],
+         ['Cargo','cargo'],['Funcao','funcao'],['CBO','cbo'],['Admissao','admissao'],
+         ['Salario','salario'],['Sexo','sexo'],['Estado Civil','estadoCivil'],
+         ['Grau de Instrucao','instrucao'],['Bairro','bairro'],['UF','uf'],
+         ['Endereco','endereco'],['RG','rg'],['PIS','pis'],['Mae','mae'],
+         ['Local de Nascimento','localNascimento'],['Registro','numero']]
+      : [['Setor','setor'],['Nome','nome'],['Cidade','cidade'],['CEP','cep'],
+         ['Data de Nascimento','nascimento'],['Telefone','_tel'],
+         ['Matricula','matricula'],['CPF','cpf']];
+    var rows=_fichas.slice().sort(function(a,b){
+      var s=String(a.setor||'').localeCompare(String(b.setor||''),'pt-BR');
+      return s!==0?s:String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR');
+    }).map(function(f){
+      var o={};
+      cols.forEach(function(c){
+        o[c[0]] = (c[1]==='_tel') ? (f.telCelular||f.telResidencial||'') : (f[c[1]]||'');
+      });
+      return o;
+    });
+    var header=cols.map(function(c){ return c[0]; });
+    var ws=XLSX.utils.json_to_sheet(rows,{ header:header });
+    ws['!cols']=header.map(function(hd){
+      if(hd==='Nome'||hd==='Endereco'||hd==='Mae') return {wch:36};
+      if(hd==='Cargo'||hd==='Funcao'||hd==='Grau de Instrucao'||hd==='Local de Nascimento') return {wch:26};
+      if(hd==='Setor'||hd==='Cidade'||hd==='Bairro') return {wch:20};
+      return {wch:14};
+    });
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Empregados');
+    XLSX.writeFile(wb,'fichas-empregados-'+new Date().toISOString().slice(0,10)+'.xlsx');
+  }).catch(function(e){ console.error('fichaExcel:',e); alert('Erro ao gerar: '+e.message); });
 };
 
 /* ---- SIMULAÇÃO ---- */
