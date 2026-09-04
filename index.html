@@ -3004,84 +3004,61 @@ function fcSlug(s){
   return String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/\s+/g,' ').trim();
 }
+function fcDigitos(s){ return String(s||'').replace(/\D/g,''); }
 
-/* Pega o valor de um campo que fica ABAIXO do rótulo, alinhado pela
-   coluna onde o rótulo começa. É assim que o formulário é montado.   */
-function valorAbaixo(linhas, i, rotulo, larguraMax){
-  var alvo=fcSlug(rotulo);
-  var pos=fcSlug(linhas[i]).indexOf(alvo);
-  if(pos<0) return '';
-  // a coluna real no texto original (o slug pode ter tamanho diferente)
-  var col=linhas[i].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').indexOf(alvo);
-  if(col<0) col=pos;
-  for(var k=i+1;k<Math.min(i+3,linhas.length);k++){
-    var l=linhas[k];
-    if(!l || !l.trim()) continue;
-    // se a linha seguinte é outro rótulo, o campo está vazio
-    var ini=Math.max(0,col-2);
-    var fim=(larguraMax? ini+larguraMax : l.length);
-    var pedaco=fcNorm(l.slice(ini,fim));
-    if(pedaco) return pedaco;
+/* A grade de colunas muda conforme o leitor de PDF: cortar o valor pela
+   posição do rótulo funcionava com pdftotext e cortava campos pela metade
+   com o pdf.js ("05/10/1970 PO"). Então os valores são achados por PADRÃO,
+   usando o rótulo apenas para saber em qual linha olhar.                  */
+function fcAcharLinha(linhas, ini, rotulos, ate){
+  var fim=Math.min(linhas.length, ini+(ate||3));
+  for(var k=ini;k<fim;k++){
+    var s=fcSlug(linhas[k]);
+    for(var r=0;r<rotulos.length;r++){ if(s.indexOf(fcSlug(rotulos[r]))>=0) return k; }
   }
-  return '';
+  return -1;
 }
-
-/* Vários rótulos na MESMA linha: corta a linha de valores nos limites de
-   cada rótulo. Usado em "Data de nascimento | Local do nascimento | ..."  */
-function camposDaLinha(linhaRot, linhaVal, rotulos){
-  var base=linhaRot.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  var marcas=[];
-  rotulos.forEach(function(r){
-    var p=base.indexOf(fcSlug(r));
-    if(p>=0) marcas.push({ rot:r, pos:p });
-  });
-  marcas.sort(function(a,b){ return a.pos-b.pos; });
-  var out={};
-  marcas.forEach(function(m,idx){
-    var ini=Math.max(0, m.pos-2);
-    var fim=(idx+1<marcas.length) ? Math.max(ini, marcas[idx+1].pos-2) : linhaVal.length;
-    out[m.rot]=fcNorm((linhaVal||'').slice(ini,fim));
-  });
-  return out;
+// procura um padrão nas N linhas seguintes ao rótulo
+function fcApos(linhas, iRot, re, n){
+  for(var k=iRot+1;k<Math.min(linhas.length,iRot+1+(n||2));k++){
+    var m=(linhas[k]||'').match(re);
+    if(m) return m;
+  }
+  return null;
 }
+var RE_DATA=/\b(\d{2}\/\d{2}\/\d{4})\b/;
+var RE_CPF=/\b(\d{3}\.\d{3}\.\d{3}-\d{2})\b/;
+var RE_CEP=/CEP\s*:?\s*(\d{5}-?\d{3})/i;
+var RE_PIS=/\b(\d{3}\.\d{4,5}\.\d{2}-\d)\b/;
+var RE_MOEDA=/\b([\d.]{1,12},\d{2})\b/;
+var RE_TEL=/\(?\d{2}\)?\s?\d{4,5}-?\d{4}/;
 
-function soDigitos(s){ return String(s||'').replace(/\D/g,''); }
-function ehData(s){ return /^\d{2}\/\d{2}\/\d{4}$/.test(fcNorm(s)); }
-
-/* ---------- parse de um registro ---------- */
 function lerFicha(linhas){
   var f={ numero:'', matricula:'', nome:'', cpf:'', nascimento:'', cidade:'', cep:'',
           telResidencial:'', telCelular:'', cargo:'', funcao:'', cbo:'', admissao:'',
           salario:'', setor:'', endereco:'', bairro:'', uf:'', rg:'', pis:'',
           sexo:'', estadoCivil:'', instrucao:'', mae:'', localNascimento:'' };
+  var texto=linhas.join('\n');
+
+  // CPF e PIS são únicos no documento: padrão basta
+  var m=texto.match(RE_CPF); if(m) f.cpf=m[1];
+  m=texto.match(RE_PIS);     if(m) f.pis=m[1];
+  m=texto.match(RE_CEP);     if(m) f.cep=m[1].replace(/(\d{5})-?(\d{3})/,'$1-$2');
+  m=texto.match(/N[ºo°]\s*:?\s*(\d{5,})/); if(m) f.numero=m[1];
 
   for(var i=0;i<linhas.length;i++){
     var l=linhas[i], s=fcSlug(l);
 
-    if(s.indexOf('registro de empregado')>=0){
-      var mN=l.match(/N[ºo°]?\s*:?\s*(\d{4,})/);
-      if(mN && !f.numero) f.numero=mN[1];
-    }
     if(s.indexOf('matricula esocial')>=0 && !f.matricula){
-      var v=valorAbaixo(linhas,i,'Matrícula eSocial',30);
-      var mm=v.match(/(\d+)/);
+      var mm=fcApos(linhas,i,/^\s*(\d{1,6})\b/,2);
       if(mm) f.matricula=mm[1];
-      // o Nº do registro vem na mesma linha, mais à direita
-      if(!f.numero){
-        var prox=fcNorm(linhas[i+1]||'');
-        var todos=prox.match(/\d+/g)||[];
-        if(todos.length>1) f.numero=todos[todos.length-1];
-      }
     }
-    // Empregado: o nome vem na linha seguinte
-    if(s==='empregado' || s.indexOf('empregado ')===0 && s.indexOf('beneficiarios')>0){
-      if(!f.nome){
-        var n=fcNorm(linhas[i+1]||'');
-        if(n && !/^resid/i.test(n)) f.nome=n;
-      }
+    // "Empregado ... Beneficiários" — o nome vem na linha de baixo
+    if(!f.nome && s.indexOf('empregado')===0 && s.indexOf('empregador')<0){
+      var n=fcNorm(linhas[i+1]||'');
+      if(n && !/^resid|^benefici/i.test(n) && /[A-ZÀ-Ú]{2}/.test(n)) f.nome=n;
     }
     if(s.indexOf('residencia')>=0 && !f.endereco){
-      // o endereço ocupa uma ou duas linhas e termina com "CEP: 00000-000"
       var partes=[];
       for(var k=i+1;k<Math.min(i+4,linhas.length);k++){
         var lp=fcNorm(linhas[k]);
@@ -3092,75 +3069,84 @@ function lerFicha(linhas){
       }
       var end=partes.join(' ');
       f.endereco=end;
-      var mc=end.match(/CEP\s*:?\s*(\d{5}-?\d{3})/i);
-      if(mc) f.cep=mc[1].replace(/(\d{5})-?(\d{3})/,'$1-$2');
-      // "Rua X, 565, BAIRRO A, BAIRRO B, CIDADE, UF, - CEP: ..."
       var semCep=end.replace(/,?\s*-?\s*CEP\s*:?\s*\d{5}-?\d{3}.*$/i,'');
       var camp=semCep.split(',').map(fcNorm).filter(Boolean);
       if(camp.length>=2){
-        var ufc=camp[camp.length-1];
-        if(/^[A-Z]{2}$/.test(ufc)){ f.uf=ufc; f.cidade=camp[camp.length-2]; f.bairro=camp[camp.length-3]||''; }
-        else { f.cidade=ufc; f.bairro=camp[camp.length-2]||''; }
+        var ult=camp[camp.length-1];
+        if(/^[A-Z]{2}$/.test(ult)){ f.uf=ult; f.cidade=camp[camp.length-2]||''; f.bairro=camp[camp.length-3]||''; }
+        else { f.cidade=ult; f.bairro=camp[camp.length-2]||''; }
       }
     }
     if(s.indexOf('data de nascimento')>=0 && !f.nascimento){
-      var c=camposDaLinha(l, linhas[i+1]||'',
-        ['Data de nascimento','Local do nascimento','País da nacionalidade','Estado civil']);
-      f.nascimento=c['Data de nascimento']||'';
-      f.localNascimento=c['Local do nascimento']||'';
-      f.estadoCivil=c['Estado civil']||'';
+      var md=fcApos(linhas,i,RE_DATA,2);
+      if(md) f.nascimento=md[1];
+      // local: o que vem depois da data, antes de dois ou mais espaços
+      var lv=linhas[i+1]||'';
+      var pos=lv.indexOf(f.nascimento);
+      if(pos>=0){
+        var resto=lv.slice(pos+f.nascimento.length);
+        var pedacos=resto.split(/\s{2,}/).map(fcNorm).filter(Boolean);
+        if(pedacos.length) f.localNascimento=pedacos[0];
+        // estado civil é o último pedaço da linha
+        if(pedacos.length>1) f.estadoCivil=pedacos[pedacos.length-1];
+      }
     }
     if(s.indexOf('cedula de identidade')>=0 && !f.rg){
-      var c2=camposDaLinha(l, linhas[i+1]||'',
-        ['Cédula de Identidade','Data de emissão','Órgão/UF emissor','Título Eleitoral']);
-      f.rg=soDigitos(c2['Cédula de Identidade']||'');
-    }
-    if(s.indexOf('cpf')>=0 && s.indexOf('ctps')>=0 && !f.cpf){
-      var c3=camposDaLinha(l, linhas[i+1]||'',
-        ['CTPS','Série','Data de expedição da CTPS','UF CTPS','CPF','Cart. Nac. Habilitação','Categoria']);
-      var cpf=soDigitos(c3['CPF']||'');
-      if(cpf.length===11) f.cpf=cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4');
+      var mr=fcApos(linhas,i,/^\s*(\d{5,})\b/,2);
+      if(mr) f.rg=mr[1];
     }
     if(s.indexOf('grau de instrucao')>=0 && !f.sexo){
-      var c4=camposDaLinha(l, linhas[i+1]||'',
-        ['Doc. militar','Categoria','Cor','Sexo','Grau de instrução']);
-      f.sexo=c4['Sexo']||'';
-      f.instrucao=c4['Grau de instrução']||'';
+      var lv2=fcNorm(linhas[i+1]||'');
+      var p2=(linhas[i+1]||'').split(/\s{2,}/).map(fcNorm).filter(Boolean);
+      // os últimos dois pedaços são sexo e grau de instrução
+      if(p2.length>=2){ f.sexo=p2[p2.length-2]; f.instrucao=p2[p2.length-1]; }
+      else if(p2.length===1) f.instrucao=p2[0];
+      if(/masculino|feminino/i.test(lv2)){
+        var msx=lv2.match(/(Masculino|Feminino)/i);
+        if(msx){
+          f.sexo=msx[1];
+          var dep=lv2.slice(lv2.indexOf(msx[1])+msx[1].length);
+          var pd=dep.split(/\s{2,}/).map(fcNorm).filter(Boolean);
+          f.instrucao=pd.length?pd[0]:fcNorm(dep);
+        }
+      }
     }
-    if(s.indexOf('telefone residencial')>=0 && !f.telResidencial && !f.telCelular){
-      var c5=camposDaLinha(l, linhas[i+1]||'',
-        ['Deficiência','Telefone Residencial','Telefone Celular']);
-      f.telResidencial=soDigitos(c5['Telefone Residencial']||'')?fcNorm(c5['Telefone Residencial']):'';
-      f.telCelular=soDigitos(c5['Telefone Celular']||'')?fcNorm(c5['Telefone Celular']):'';
+    if(s.indexOf('telefone residencial')>=0 && (!f.telResidencial||!f.telCelular)){
+      var lt=linhas[i+1]||'';
+      var tels=lt.match(new RegExp(RE_TEL.source,'g'))||[];
+      if(tels.length){ f.telResidencial=fcNorm(tels[0]); if(tels[1]) f.telCelular=fcNorm(tels[1]); }
     }
-    if(s.indexOf('cargo')>=0 && s.indexOf('funcao')>=0 && !f.cargo){
-      var c6=camposDaLinha(l, linhas[i+1]||'', ['Cargo','Função','C.B.O.']);
-      f.cargo=c6['Cargo']||'';
-      f.funcao=c6['Função']||'';
-      f.cbo=soDigitos(c6['C.B.O.']||'');
+    if(s.indexOf('cargo')>=0 && s.indexOf('c.b.o')>=0 && !f.cargo){
+      var lc2=linhas[i+1]||'';
+      var pc=lc2.split(/\s{2,}/).map(fcNorm).filter(Boolean);
+      if(pc.length){
+        f.cargo=pc[0];
+        var ultimo=pc[pc.length-1];
+        if(pc.length>1 && /^\d{4,7}$/.test(ultimo)){ f.cbo=ultimo; if(pc.length>2) f.funcao=pc[1]; }
+        else if(pc.length>1) f.funcao=pc[1];
+      }
     }
     if(s.indexOf('data de admissao')>=0 && !f.admissao){
-      var c7=camposDaLinha(l, linhas[i+1]||'',
-        ['Data de Admissão','Salário','Por','Horário de Trabalho','Horário de Intervalo']);
-      f.admissao=c7['Data de Admissão']||'';
-      var sal=(c7['Salário']||'').replace(/R\$\s*/,'');
-      var ms=sal.match(/[\d.]+,\d{2}/);
-      if(ms) f.salario=ms[0];
+      var ma=fcApos(linhas,i,RE_DATA,2);
+      if(ma) f.admissao=ma[1];
+      var ms=fcApos(linhas,i,RE_MOEDA,2);
+      if(ms) f.salario=ms[1];
     }
-    if(s.indexOf('sob n')>=0 && !f.pis){
-      var c8=camposDaLinha(l, linhas[i+1]||'', ['Cadastrado em','Sob nº','Domicílio bancário']);
-      f.pis=fcNorm(c8['Sob nº']||'');
+    if(s==='mae' && !f.mae){
+      var mn=fcNorm(linhas[i+1]||'');
+      if(mn && /[A-ZÀ-Ú]{2}/.test(mn)) f.mae=mn;
     }
-    if(s.indexOf('mae')>=0 && s.length<8 && !f.mae){
-      f.mae=fcNorm(linhas[i+1]||'');
-    }
-    // centro de custo: vem na última página do registro
-    if(s.indexOf('informacoes do centro de custo')>=0){
+    if(s.indexOf('informacoes do centro de custo')>=0 && !f.setor){
       for(var j=i+1;j<Math.min(i+6,linhas.length);j++){
         var mcc=(linhas[j]||'').match(/Nome\s*:\s*(.+)$/i);
         if(mcc){ f.setor=fcNorm(mcc[1]); break; }
       }
     }
+  }
+  // o salário pode estar na mesma linha do "R$"
+  if(!f.salario){
+    var msal=texto.match(/R\$\s*([\d.]{1,12},\d{2})/);
+    if(msal) f.salario=msal[1];
   }
   return f;
 }
@@ -3169,12 +3155,11 @@ function lerFicha(linhas){
 function fatiarFichas(linhas){
   var inicios=[];
   linhas.forEach(function(l,i){
-    // a 1ª página de cada registro tem o título isolado; a 2ª tem "Nº:" junto
     var s=fcSlug(l);
-    if(s.indexOf('registro de empregado')>=0 && s.indexOf('n:')<0 && s.indexOf('n :')<0){
-      // evita pegar a página de continuação, que tem "REGISTRO DE EMPREGADO  Nº: 000001"
-      if(!/N[ºo°]\s*:/.test(l)) inicios.push(i);
-    }
+    if(s.indexOf('registro de empregado')<0) return;
+    // a página de continuação traz "REGISTRO DE EMPREGADO  Nº: 000001"
+    if(/N[ºo°]\s*:/.test(l)) return;
+    inicios.push(i);
   });
   if(!inicios.length) return [];
   var blocos=[];
@@ -3185,11 +3170,17 @@ function fatiarFichas(linhas){
   }
   return blocos;
 }
-
 function lerFichas(linhas){
   return fatiarFichas(linhas).map(lerFicha).filter(function(f){ return f.nome; });
 }
-
+// diagnóstico para quando nada é reconhecido
+function fichaDiagnostico(linhas){
+  var blocos=fatiarFichas(linhas);
+  return { linhas:linhas.length, blocos:blocos.length,
+    temTitulo:linhas.some(function(l){ return fcSlug(l).indexOf('registro de empregado')>=0; }),
+    temCpf:linhas.some(function(l){ return RE_CPF.test(l); }),
+    comNome:blocos.map(lerFicha).filter(function(f){ return f.nome; }).length };
+}
 
 /* ---- FICHA DE EMPREGADO: PDF -> Excel ---- */
 window.fichaLerPDF=function(input){
@@ -3229,7 +3220,16 @@ window.fichaLerPDF=function(input){
       var fichas=lerFichas(linhas);
       st.textContent='';
       if(!fichas.length){
-        pv.innerHTML='<div class="alert a-warn" style="margin:0">⚠ Não reconheci este PDF como o Registro de Empregado. Confirme se é o relatório certo, com camada de texto (não escaneado).</div>';
+        // diz o que encontrou, em vez de só recusar: economiza uma rodada de suporte
+        var dg=fichaDiagnostico(linhas);
+        var pista = !dg.linhas ? 'O PDF não tem camada de texto — parece escaneado, e aí precisaria de OCR.'
+          : !dg.temTitulo ? 'Não achei o título "REGISTRO DE EMPREGADO". Este parece ser outro relatório — confira se não é o Extrato Mensal, que vai no card acima.'
+          : !dg.blocos ? 'Achei o título mas não consegui separar os registros.'
+          : 'Separei '+dg.blocos+' registro(s), mas não achei o nome do empregado em nenhum.';
+        pv.innerHTML='<div class="alert a-warn" style="margin:0">⚠ Não reconheci este PDF como o Registro de Empregado.<br>'+
+          '<span style="font-size:11.5px">'+esc(pista)+'</span><br>'+
+          '<span style="font-size:11px;opacity:.8">Lidas '+dg.linhas+' linhas · título '+(dg.temTitulo?'sim':'não')+
+          ' · registros '+dg.blocos+' · CPF encontrado '+(dg.temCpf?'sim':'não')+'</span></div>';
         return;
       }
       _fichas=fichas;
