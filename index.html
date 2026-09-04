@@ -3031,7 +3031,8 @@ var RE_CPF=/\b(\d{3}\.\d{3}\.\d{3}-\d{2})\b/;
 var RE_CEP=/CEP\s*:?\s*(\d{5}-?\d{3})/i;
 var RE_PIS=/\b(\d{3}\.\d{4,5}\.\d{2}-\d)\b/;
 var RE_MOEDA=/\b([\d.]{1,12},\d{2})\b/;
-var RE_TEL=/\(?\d{2}\)?\s?\d{4,5}-?\d{4}/;
+// (51) 99999-9999 · 51 99999-9999 · 51999999999 · 3333-3333 · 9 9999-9999
+var RE_TEL=/(?:\(?\d{2}\)?[\s.-]{0,2})?\d{4,5}[\s.-]?\d{4}\b/;
 
 function lerFicha(linhas){
   var f={ numero:'', matricula:'', nome:'', cpf:'', nascimento:'', cidade:'', cep:'',
@@ -3050,8 +3051,10 @@ function lerFicha(linhas){
     var l=linhas[i], s=fcSlug(l);
 
     if(s.indexOf('matricula esocial')>=0 && !f.matricula){
-      var mm=fcApos(linhas,i,/^\s*(\d{1,6})\b/,2);
-      if(mm) f.matricula=mm[1];
+      // a matrícula eSocial pode ser código alfanumérico longo
+      // (ex.: COL875597650680000039363), não só o número curto
+      var mm=fcApos(linhas,i,/^\s*([A-Za-z0-9][A-Za-z0-9.\-\/]{0,39})(?=\s|$)/,2);
+      if(mm) f.matricula=fcNorm(mm[1]);
     }
     // "Empregado ... Beneficiários" — o nome vem na linha de baixo
     if(!f.nome && s.indexOf('empregado')===0 && s.indexOf('empregador')<0){
@@ -3112,9 +3115,34 @@ function lerFicha(linhas){
       }
     }
     if(s.indexOf('telefone residencial')>=0 && (!f.telResidencial||!f.telCelular)){
+      /* Com um telefone só na linha, pegar o primeiro e chamar de residencial
+         errava: muita ficha tem apenas o celular preenchido. Aqui a linha de
+         valores é cortada na coluna do rótulo "Telefone Celular", e cada
+         metade é procurada separadamente.                                   */
       var lt=linhas[i+1]||'';
-      var tels=lt.match(new RegExp(RE_TEL.source,'g'))||[];
-      if(tels.length){ f.telResidencial=fcNorm(tels[0]); if(tels[1]) f.telCelular=fcNorm(tels[1]); }
+      var base=l.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+      var pCel=base.indexOf('telefone celular');
+      var pRes=base.indexOf('telefone residencial');
+      var achar=function(txt){
+        var m=String(txt||'').match(RE_TEL);
+        return m?fcNorm(m[0]):'';
+      };
+      if(pCel>0 && pRes>=0 && pRes<pCel){
+        var corte=Math.max(0, pCel-3);
+        var esq=lt.slice(Math.max(0,pRes-3), corte);
+        var dir=lt.slice(corte);
+        f.telResidencial=achar(esq);
+        f.telCelular=achar(dir);
+      } else {
+        var todos=lt.match(new RegExp(RE_TEL.source,'g'))||[];
+        if(todos.length>1){ f.telResidencial=fcNorm(todos[0]); f.telCelular=fcNorm(todos[1]); }
+        else if(todos.length===1){
+          // sem saber a coluna, decide pela posição na linha
+          var pos=lt.indexOf(todos[0]);
+          if(pCel>0 && pos>=pCel-6) f.telCelular=fcNorm(todos[0]);
+          else f.telResidencial=fcNorm(todos[0]);
+        }
+      }
     }
     if(s.indexOf('cargo')>=0 && s.indexOf('c.b.o')>=0 && !f.cargo){
       var lc2=linhas[i+1]||'';
