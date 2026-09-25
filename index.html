@@ -127,6 +127,8 @@ th.ord-on{color:var(--primary)}
 
 /* detalhamento: tabela larga */
 .admin-only{display:none !important}
+/* aba escondida para uma pessoa específica (campo custosOcultar no cadastro) */
+.navbtn.oculta{display:none !important}
 body.is-admin .admin-only{display:block !important}
 body.is-admin button.admin-only{display:inline-flex !important;align-items:center}
 .tdet{font-size:12px}
@@ -661,6 +663,17 @@ const authProd = getAuth(appProd);
 
 /* ============ ESTADO ============ */
 var pagina='painel', sessaoEmail='', currentRole=null, currentAtivo=false, podeEditar=false;
+/* Abas que esta pessoa não vê, lidas de usuarios/{uid}.custosOcultar — uma
+   lista de ids de aba, ex.: ["receitas"]. Serve para enxugar a tela de quem
+   só precisa de parte do app. É organização, não sigilo: o dado continua no
+   banco. Administrador nunca tem aba escondida. */
+var abasOcultas=[];
+function aplicarAbasOcultas(){
+  document.querySelectorAll('.navbtn[data-p]').forEach(function(b){
+    b.classList.toggle('oculta', abasOcultas.indexOf(b.getAttribute('data-p'))>=0);
+  });
+  if(abasOcultas.indexOf(pagina)>=0) nav('painel');
+}
 var mps=[], comprasMP=[], massas=[], recheios=[], embalagens=[];
 var produtosConf=[], quadraProdutos=[], quadraKits=[];
 var produtos=[];   // Confeitaria + Quadra, já normalizados
@@ -763,6 +776,7 @@ window.togglePin=function(e){
 window.nav=function(p){
   if(!TITLES[p]) return;
   if((p==='detalhe'||p==='quadra'||p==='conc') && currentRole!=='admin') p='produtos';
+  if(abasOcultas.indexOf(p)>=0) p='painel';
   pagina=p;
   document.querySelectorAll('.page').forEach(function(el){ el.classList.remove('on'); });
   var pg=document.getElementById('page-'+p); if(pg) pg.classList.add('on');
@@ -3451,7 +3465,11 @@ function iniciarSessao(user){
     if(!currentAtivo){ negar('Sua conta ('+sessaoEmail+') ainda não foi liberada por um administrador.'); return; }
     if(currentRole!=='admin' && !flagCustos){ negar('O app de Custos é restrito a administradores e ao time autorizado (flag custos).'); return; }
     podeEditar=(currentRole==='admin' || d.custosAdmin===true);
+    abasOcultas=(currentRole==='admin' || !Array.isArray(d.custosOcultar))
+      ? [] : d.custosOcultar.map(function(x){ return String(x).trim().toLowerCase(); })
+                            .filter(function(x){ return x && x!=='painel'; });   /* o painel é a casa: nunca some */
     liberar(d);
+    aplicarAbasOcultas();
   }, function(err){ console.error('usuarios:',err); negar('Não foi possível carregar suas permissões: '+(err.code||err.message)); });
 }
 // onSnapshot que falha por permissão é encerrado pelo Firebase e não volta sozinho.
